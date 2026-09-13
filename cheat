@@ -7,7 +7,7 @@
 -- ============================================================
 -- KEYAUTH VERIFICATION (NE PAS OBFUSQUER CETTE PARTIE)
 -- ============================================================
-local KeyAuthLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/mazkdevf/KeyAuth-Lua-Examples/main/Roblox/keyauth.lua"))()
+local KeyAuthLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/nyra000000/ug-info-rivals/refs/heads/main/cheat"))()
 
 local auth = KeyAuthLib.new({
     name = "UG INFO Rivals",
