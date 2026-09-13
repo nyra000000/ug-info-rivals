@@ -11,7 +11,7 @@ local KeyAuthLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/ny
 
 local auth = KeyAuthLib.new({
     name = "UG INFO Rivals",
-    ownerid = "LyIUZh7KNG",
+    ownerid = "85b4a6c13c103c491dc20d9d5593eeb77796cef938d114caee8520cf7f2070ed",
     version = "5.0",
 })
 
