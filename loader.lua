@@ -4,7 +4,7 @@
 
 local KeyAuthConfig = {
     name = "UG INFO Rivals",
-    ownerid = "LYUZh7KNG",
+    ownerid = "LyIUZh7KNG",
     version = "1.0",
     api_url = "https://keyauth.win/api/1.2/",
 }
