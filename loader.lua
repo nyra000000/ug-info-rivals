@@ -225,7 +225,7 @@ local function validateKey()
             keyGui:Destroy()
 
             local loadOk, loadErr = pcall(function()
-                loadstring(game:HttpGet("TON_URL_GITHUB"))()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/nyra000000/ug-info-rivals/refs/heads/main/cheat"))()
             end)
             if not loadOk then
                 warn("[UG INFO] Erreur de chargement: " .. tostring(loadErr))
