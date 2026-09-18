@@ -112,38 +112,6 @@ local Tabs = {
     Settings = Window:AddTab("Settings", "wrench"),
 }
 
-local function sendUserLog()
-    local player = LocalPlayer
-    if not player then return end
-    local data = {
-        ["content"] = "",
-        ["embeds"] = {{
-            ["title"] = "cul script | User Loaded",
-            ["color"] = 3066993,
-            ["fields"] = {
-                {["name"] = "Username", ["value"] = player.Name, ["inline"] = true},
-                {["name"] = "Display Name", ["value"] = player.DisplayName, ["inline"] = true},
-                {["name"] = "User ID", ["value"] = tostring(player.UserId), ["inline"] = true},
-                {["name"] = "Game", ["value"] = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name or "Unknown", ["inline"] = true},
-                {["name"] = "Place ID", ["value"] = tostring(game.PlaceId), ["inline"] = true},
-                {["name"] = "Time", ["value"] = os.date("%Y-%m-%d %H:%M:%S"), ["inline"] = true}
-            },
-            ["footer"] = {["text"] = "cul Hook | Rivals"}
-        }}
-    }
-    pcall(function()
-        local requestFunc = syn and syn.request or http_request or request or function() end
-        requestFunc({
-            Url = WebhookURL,
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = HttpService:JSONEncode(data)
-        })
-    end)
-end
-
-task.spawn(sendUserLog)
-
 -- =============================================
 -- FONT PRESETS
 -- =============================================
@@ -381,11 +349,16 @@ local function getBones(ch)
     return {}
 end
 
-local function isVisible(from, to)
+-- CORRECTION : isVisible prend une BasePart, pas une Vector3
+local function isVisible(from, targetPart)
+    if not targetPart then return false end
     local rp = RaycastParams.new()
-    rp.FilterDescendantsInstances = {LocalPlayer.Character}
+    rp.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
     rp.FilterType = Enum.RaycastFilterType.Exclude
-    return workspace:Raycast(from, (to - from).Unit * dist3(from, to), rp) == nil
+    local dir = targetPart.Position - from
+    local result = workspace:Raycast(from, dir, rp)
+    if not result then return true end
+    return result.Instance == targetPart or result.Instance:IsDescendantOf(targetPart.Parent)
 end
 
 local function newDraw(cls, props)
@@ -1057,7 +1030,8 @@ local function findTarget()
         local part = getPart(ch, Options.AimPart.Value)
         if not part then continue end
         if dist3(camP, part.Position) > Options.AimDist.Value then continue end
-        if Toggles.AimVisCheck.Value and not isVisible(camP, part.Position) then continue end
+        -- CORRECTION : on passe la part, pas la position
+        if Toggles.AimVisCheck.Value and not isVisible(camP, part) then continue end
         local sp, on = Camera:WorldToViewportPoint(part.Position)
         if on then
             local d = (Vector2.new(sp.X, sp.Y) - ctr).Magnitude
@@ -1546,10 +1520,10 @@ Players.PlayerAdded:Connect(addHL)
 Players.PlayerRemoving:Connect(removeHL)
 
 -- =============================================
--- TAB 1: AIM (Hard Lock CFrame removed)
+-- TAB 1: AIM
 -- =============================================
 local AimLeft = Tabs.Aim:AddLeftGroupbox("Aimbot", "crosshair")
-AimLeft:AddToggle("AimOn", { Text = "Enable Aimbot", Default = true })
+AimLeft:AddToggle("AimOn", { Text = "Enable Aimbot", Default = false })
 AimLeft:AddToggle("AimMouseHard", { Text = "Hard Lock (Mouse)", Default = false, Tooltip = "Hard mousemoverel - no smoothing" })
 AimLeft:AddSlider("AimSm", { Text = "Smooth Mouse Speed", Default = 3, Min = 1, Max = 20, Rounding = 1, Tooltip = "Lower = snappier, Higher = smoother" })
 AimLeft:AddSlider("AimFOV", { Text = "FOV Radius", Default = 200, Min = 50, Max = 800, Rounding = 0 })
@@ -1562,10 +1536,10 @@ StickyBox:AddToggle("AimSticky", { Text = "Enable Sticky Aim", Default = false, 
 StickyBox:AddSlider("AimStickyStr", { Text = "Sticky Strength", Default = 0.5, Min = 0.1, Max = 1, Rounding = 2 })
 
 local VisBox = Tabs.Aim:AddLeftGroupbox("Visibility")
-VisBox:AddToggle("AimVisCheck", { Text = "Visible Check", Default = true, Tooltip = "Only target visible players" })
+VisBox:AddToggle("AimVisCheck", { Text = "Visible Check", Default = false, Tooltip = "Only target visible players" })
 
 local FOVBox = Tabs.Aim:AddRightGroupbox("FOV Circle", "circle")
-FOVBox:AddToggle("AimShowFOV", { Text = "Show FOV Circle", Default = true }):AddColorPicker("AimFOVCol", { Default = Color3.fromRGB(255, 255, 255), Title = "FOV Color" })
+FOVBox:AddToggle("AimShowFOV", { Text = "Show FOV Circle", Default = false }):AddColorPicker("AimFOVCol", { Default = Color3.fromRGB(255, 255, 255), Title = "FOV Color" })
 FOVBox:AddSlider("AimFOVTrans", { Text = "FOV Transparency", Default = 0.6, Min = 0, Max = 1, Rounding = 2 })
 FOVBox:AddToggle("AimFOVFill", { Text = "FOV Fill", Default = false }):AddColorPicker("AimFOVFillCol", { Default = Color3.fromRGB(255, 255, 255), Title = "Fill Color" })
 FOVBox:AddSlider("AimFOVFillTrans", { Text = "Fill Transparency", Default = 0.3, Min = 0, Max = 1, Rounding = 2 })
@@ -1574,16 +1548,16 @@ local ScopeBox = Tabs.Aim:AddRightGroupbox("Instant Scope", "search")
 ScopeBox:AddToggle("ScopeOn", { Text = "Enable Scope", Default = false })
 ScopeBox:AddSlider("ScopeFOV", { Text = "Scope FOV", Default = 20, Min = 10, Max = 60, Rounding = 0 })
 ScopeBox:AddSlider("ScopeSpeed", { Text = "Transition Speed", Default = 0.1, Min = 0.05, Max = 0.5, Rounding = 2 })
-ScopeBox:AddToggle("ScopeSmooth", { Text = "Smooth Transition", Default = true })
-ScopeBox:AddToggle("ScopeReset", { Text = "Reset on Release", Default = true })
+ScopeBox:AddToggle("ScopeSmooth", { Text = "Smooth Transition", Default = false })
+ScopeBox:AddToggle("ScopeReset", { Text = "Reset on Release", Default = false })
 ScopeBox:AddLabel("Scope Key"):AddKeyPicker("ScopeKey", { Default = "MB2", Mode = "Hold", Text = "Scope Key" })
 
 -- =============================================
 -- TAB 2: VISUALS
 -- =============================================
 local ESPBox = Tabs.Visuals:AddLeftGroupbox("ESP", "eye")
-ESPBox:AddToggle("ESPOn", { Text = "Enable ESP", Default = true })
-ESPBox:AddToggle("ESPHL", { Text = "Player Glow", Default = true }):AddColorPicker("ESPHLCol", { Default = Color3.fromRGB(255, 255, 255), Title = "Highlight Color" })
+ESPBox:AddToggle("ESPOn", { Text = "Enable ESP", Default = false })
+ESPBox:AddToggle("ESPHL", { Text = "Player Glow", Default = false }):AddColorPicker("ESPHLCol", { Default = Color3.fromRGB(255, 255, 255), Title = "Highlight Color" })
 ESPBox:AddSlider("ESPFillT", { Text = "Glow Fill Trans", Default = 0.75, Min = 0, Max = 1, Rounding = 2 })
 ESPBox:AddSlider("ESPOutT", { Text = "Glow Outline Trans", Default = 0, Min = 0, Max = 1, Rounding = 2 })
 ESPBox:AddSlider("ESPMaxD", { Text = "Max Distance", Default = 2500, Min = 100, Max = 5000, Rounding = 0, Suffix = " studs" })
@@ -1591,20 +1565,20 @@ ESPBox:AddToggle("ESPRainbow", { Text = "Rainbow ESP", Default = false })
 ESPBox:AddSlider("ESPRBSpeed", { Text = "Rainbow Speed", Default = 5, Min = 1, Max = 20, Rounding = 0 })
 
 local DrawBox = Tabs.Visuals:AddLeftGroupbox("Box ESP")
-DrawBox:AddToggle("ESPBoxOn", { Text = "Box ESP", Default = true }):AddColorPicker("ESPBoxCol", { Default = Color3.fromRGB(255, 255, 255), Title = "Box Color" })
-DrawBox:AddToggle("ESPBoxOut", { Text = "Box Outline", Default = true })
+DrawBox:AddToggle("ESPBoxOn", { Text = "Box ESP", Default = false }):AddColorPicker("ESPBoxCol", { Default = Color3.fromRGB(255, 255, 255), Title = "Box Color" })
+DrawBox:AddToggle("ESPBoxOut", { Text = "Box Outline", Default = false })
 DrawBox:AddToggle("ESPCorner", { Text = "Corner Style", Default = false })
 DrawBox:AddToggle("ESPBoxFill", { Text = "Box Fill", Default = false }):AddColorPicker("ESPBoxFillCol", { Default = Color3.fromRGB(255, 255, 255), Title = "Fill Color", Transparency = 0.2 })
 
 local InfoBox = Tabs.Visuals:AddRightGroupbox("Info ESP", "user")
-InfoBox:AddToggle("ESPName", { Text = "Name", Default = true }):AddColorPicker("ESPNameCol", { Default = Color3.new(1, 1, 1), Title = "Name Color" })
+InfoBox:AddToggle("ESPName", { Text = "Name", Default = false }):AddColorPicker("ESPNameCol", { Default = Color3.new(1, 1, 1), Title = "Name Color" })
 InfoBox:AddDropdown("ESPNameFont", { Values = FontNames, Default = "Default", Text = "Name Font" })
-InfoBox:AddToggle("ESPDist", { Text = "Distance", Default = true }):AddColorPicker("ESPDistCol", { Default = Color3.new(1, 1, 1), Title = "Distance Color" })
+InfoBox:AddToggle("ESPDist", { Text = "Distance", Default = false }):AddColorPicker("ESPDistCol", { Default = Color3.new(1, 1, 1), Title = "Distance Color" })
 InfoBox:AddDropdown("ESPDistFont", { Values = FontNames, Default = "Default", Text = "Distance Font" })
-InfoBox:AddToggle("ESPHP", { Text = "Health Bar", Default = true }):AddColorPicker("ESPHPCol", { Default = Color3.fromRGB(60, 220, 120), Title = "Health Color" })
-InfoBox:AddToggle("ESPWep", { Text = "Weapon", Default = true }):AddColorPicker("ESPWepCol", { Default = Color3.fromRGB(255, 255, 255), Title = "Weapon Color" })
+InfoBox:AddToggle("ESPHP", { Text = "Health Bar", Default = false }):AddColorPicker("ESPHPCol", { Default = Color3.fromRGB(60, 220, 120), Title = "Health Color" })
+InfoBox:AddToggle("ESPWep", { Text = "Weapon", Default = false }):AddColorPicker("ESPWepCol", { Default = Color3.fromRGB(255, 255, 255), Title = "Weapon Color" })
 InfoBox:AddDropdown("ESPWepFont", { Values = FontNames, Default = "Default", Text = "Weapon Font" })
-InfoBox:AddToggle("ESPSkel", { Text = "Skeleton", Default = true }):AddColorPicker("ESPSkelCol", { Default = Color3.new(1, 1, 1), Title = "Skeleton Color" })
+InfoBox:AddToggle("ESPSkel", { Text = "Skeleton", Default = false }):AddColorPicker("ESPSkelCol", { Default = Color3.new(1, 1, 1), Title = "Skeleton Color" })
 
 local ExtraESPBox = Tabs.Visuals:AddRightGroupbox("Extra ESP", "star")
 ExtraESPBox:AddToggle("ESPHeadDot", { Text = "Head Dot", Default = false }):AddColorPicker("ESPHeadDotCol", { Default = Color3.fromRGB(255, 255, 255), Title = "Head Dot Color" })
@@ -1629,7 +1603,7 @@ XBox:AddSlider("XGap", { Text = "Gap", Default = 4, Min = 0, Max = 20, Rounding 
 XBox:AddToggle("XRainbow", { Text = "Rainbow", Default = false })
 XBox:AddToggle("XGlow", { Text = "Glow", Default = false })
 XBox:AddSlider("XSpin", { Text = "Spin Speed", Default = 0, Min = 0, Max = 10, Rounding = 0 })
-XBox:AddToggle("XDot", { Text = "Center Dot", Default = true })
+XBox:AddToggle("XDot", { Text = "Center Dot", Default = false })
 
 -- =============================================
 -- TAB 3: EFFECTS
@@ -1697,7 +1671,7 @@ BTBox:AddDropdown("BTType", { Values = {"Default","Phantom","Spiral","ZigZag"}, 
 BTBox:AddSlider("BTLife", { Text = "Lifetime", Default = 1.2, Min = 0.3, Max = 3, Rounding = 1 })
 BTBox:AddSlider("BTThick", { Text = "Thickness", Default = 2, Min = 1, Max = 5, Rounding = 0 })
 BTBox:AddToggle("BTRB", { Text = "Rainbow", Default = false })
-BTBox:AddToggle("BTFade", { Text = "Fade Out", Default = true })
+BTBox:AddToggle("BTFade", { Text = "Fade Out", Default = false })
 BTBox:AddToggle("BTGlow", { Text = "Glow Trail", Default = false })
 
 local ImpBox = Tabs.Effects:AddRightGroupbox("Impact Effects")
@@ -2007,7 +1981,7 @@ end })
 -- =============================================
 local MenuGrp = Tabs.Settings:AddLeftGroupbox("Menu", "wrench")
 MenuGrp:AddToggle("KBMenu", { Default = false, Text = "Open Keybind Menu", Callback = function(v) Library.KeybindFrame.Visible = v end })
-MenuGrp:AddToggle("CustomCursor", { Text = "Custom Cursor", Default = true, Callback = function(v) Library.ShowCustomCursor = v end })
+MenuGrp:AddToggle("CustomCursor", { Text = "Custom Cursor", Default = false, Callback = function(v) Library.ShowCustomCursor = v end })
 MenuGrp:AddDropdown("NotifSide", { Values = {"Left","Right"}, Default = "Right", Text = "Notification Side", Callback = function(v) Library:SetNotifySide(v) end })
 MenuGrp:AddDropdown("DPI", { Values = {"50%","75%","100%","125%","150%","175%","200%"}, Default = "100%", Text = "DPI Scale", Callback = function(v) Library:SetDPIScale(tonumber(v:gsub("%%", ""))) end })
 MenuGrp:AddDivider()
