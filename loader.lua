@@ -77,7 +77,7 @@ end
 -- ============================================================
 -- CHARGEMENT DU CHEAT
 -- ============================================================
-local CHEAT_URL = "TON_URL_GITHUB_CHEAT"  -- ← remplace par l'URL de ton cheat.lua
+local CHEAT_URL = "https://raw.githubusercontent.com/nyra000000/ug-info-rivals/refs/heads/main/loader.lua"  -- ← remplace par l'URL de ton cheat.lua
 
 local function loadCheat()
     local loadOk, loadErr = pcall(function()
