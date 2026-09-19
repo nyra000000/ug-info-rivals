@@ -3,13 +3,13 @@
 -- ============================================================
 
 local KeyAuthConfig = {
-    name = "UG INFO Rivals",
+    name = "UG%20INFO%20Rivals",
     ownerid = "LyIUZh7KNG",
     version = "1.0",
     api_url = "https://keyauth.win/api/1.2/",
 }
 
-local CHEAT_URL = "https://raw.githubusercontent.com/nyra000000/ug-info-rivals/refs/heads/main/cheat"  -- ← remplace par l'URL de ton cheat.lua
+local CHEAT_URL = "TON_URL_GITHUB_CHEAT"  -- ← remplace par l'URL raw de ton cheat.lua
 
 -- ============================================================
 -- VÉRIFICATION KEYAUTH
