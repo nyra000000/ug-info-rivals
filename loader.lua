@@ -1,5 +1,5 @@
 -- ============================================================
--- LOADER UG INFO // RIVALS (XENO COMPATIBLE)
+-- LOADER UG INFO // RIVALS (XENO)
 -- ============================================================
 
 local KeyAuthConfig = {
@@ -9,33 +9,7 @@ local KeyAuthConfig = {
     api_url = "https://keyauth.win/api/1.2/",
 }
 
--- ============================================================
--- SAUVEGARDE DE LA CLÉ (XENO)
--- ============================================================
-local function saveKey(key)
-    if Xeno and Xeno.SetGlobal then
-        pcall(function() Xeno.SetGlobal("UGINFO_KEY", key) end)
-    end
-    if setclipboard then
-        pcall(setclipboard, key)
-    end
-end
-
-local function loadKey()
-    if Xeno and Xeno.GetGlobal then
-        local ok, key = pcall(function() return Xeno.GetGlobal("UGINFO_KEY") end)
-        if ok and key and type(key) == "string" and key ~= "" then
-            return key
-        end
-    end
-    return nil
-end
-
-local function clearKey()
-    if Xeno and Xeno.SetGlobal then
-        pcall(function() Xeno.SetGlobal("UGINFO_KEY", "") end)
-    end
-end
+local CHEAT_URL = "TON_URL_GITHUB_CHEAT"  -- ← remplace par l'URL de ton cheat.lua
 
 -- ============================================================
 -- VÉRIFICATION KEYAUTH
@@ -77,8 +51,6 @@ end
 -- ============================================================
 -- CHARGEMENT DU CHEAT
 -- ============================================================
-local CHEAT_URL = "https://raw.githubusercontent.com/nyra000000/ug-info-rivals/refs/heads/main/loader.lua"  -- ← remplace par l'URL de ton cheat.lua
-
 local function loadCheat()
     local loadOk, loadErr = pcall(function()
         loadstring(game:HttpGet(CHEAT_URL))()
@@ -89,158 +61,131 @@ local function loadCheat()
 end
 
 -- ============================================================
--- VÉRIFICATION AUTOMATIQUE AU LANCEMENT
+-- FENÊTRE KEYAUTH
 -- ============================================================
-local savedKey = loadKey()
-local needUI = true
+local keyGui = Instance.new("ScreenGui")
+keyGui.Name = "UG_INFO_KeyAuth"
+keyGui.ResetOnSpawn = false
+keyGui.IgnoreGuiInset = true
+keyGui.DisplayOrder = 60000
+keyGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+keyGui.Parent = game:GetService("CoreGui")
 
-if savedKey and savedKey ~= "" then
+local keyFrame = Instance.new("Frame")
+keyFrame.Size = UDim2.new(0, 380, 0, 240)
+keyFrame.Position = UDim2.new(0.5, -190, 0.5, -120)
+keyFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+keyFrame.BorderSizePixel = 0
+keyFrame.Active = true
+keyFrame.Parent = keyGui
+
+local kfCorner = Instance.new("UICorner")
+kfCorner.CornerRadius = UDim.new(0, 14)
+kfCorner.Parent = keyFrame
+
+local kfStroke = Instance.new("UIStroke")
+kfStroke.Color = Color3.fromRGB(230, 230, 230)
+kfStroke.Thickness = 1.4
+kfStroke.Transparency = 0.25
+kfStroke.Parent = keyFrame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -24, 0, 32)
+title.Position = UDim2.new(0, 12, 0, 12)
+title.BackgroundTransparency = 1
+title.Text = "UG INFO // RIVALS"
+title.TextColor3 = Color3.fromRGB(245, 245, 245)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 15
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = keyFrame
+
+local brand = Instance.new("TextLabel")
+brand.Size = UDim2.new(1, -24, 0, 20)
+brand.Position = UDim2.new(0, 12, 0, 44)
+brand.BackgroundTransparency = 1
+brand.Text = "Entre ta clé pour continuer"
+brand.TextColor3 = Color3.fromRGB(160, 160, 160)
+brand.Font = Enum.Font.Gotham
+brand.TextSize = 12
+brand.TextXAlignment = Enum.TextXAlignment.Left
+brand.Parent = keyFrame
+
+local keyBox = Instance.new("TextBox")
+keyBox.Size = UDim2.new(1, -24, 0, 42)
+keyBox.Position = UDim2.new(0, 12, 0, 76)
+keyBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+keyBox.BorderSizePixel = 0
+keyBox.Text = ""
+keyBox.PlaceholderText = "XXXX-XXXX-XXXX"
+keyBox.TextColor3 = Color3.fromRGB(245, 245, 245)
+keyBox.PlaceholderColor3 = Color3.fromRGB(100, 100, 100)
+keyBox.Font = Enum.Font.GothamBold
+keyBox.TextSize = 14
+keyBox.ClearTextOnFocus = false
+keyBox.Parent = keyFrame
+local kbCorner = Instance.new("UICorner")
+kbCorner.CornerRadius = UDim.new(0, 8)
+kbCorner.Parent = keyBox
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -24, 0, 20)
+statusLabel.Position = UDim2.new(0, 12, 0, 124)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = ""
+statusLabel.TextColor3 = Color3.fromRGB(255, 90, 90)
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextSize = 11
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = keyFrame
+
+local submitBtn = Instance.new("TextButton")
+submitBtn.Size = UDim2.new(1, -24, 0, 40)
+submitBtn.Position = UDim2.new(0, 12, 0, 148)
+submitBtn.BackgroundColor3 = Color3.fromRGB(240, 240, 240)
+submitBtn.Text = "VALIDER"
+submitBtn.TextColor3 = Color3.fromRGB(15, 15, 15)
+submitBtn.Font = Enum.Font.GothamBold
+submitBtn.TextSize = 13
+submitBtn.AutoButtonColor = false
+submitBtn.Parent = keyFrame
+local sbCorner = Instance.new("UICorner")
+sbCorner.CornerRadius = UDim.new(0, 8)
+sbCorner.Parent = submitBtn
+
+local function validate()
+    local key = keyBox.Text
+    if key == "" or key == "XXXX-XXXX-XXXX" then
+        statusLabel.Text = "Entre une clé valide."
+        statusLabel.TextColor3 = Color3.fromRGB(255, 90, 90)
+        return
+    end
+
+    statusLabel.Text = "Vérification..."
+    statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    submitBtn.Text = "..."
+    submitBtn.BackgroundColor3 = Color3.fromRGB(180, 180, 180)
+
     task.spawn(function()
-        local valid, msg = verifyKey(savedKey)
+        local valid, msg = verifyKey(key)
         if valid then
-            needUI = false
+            statusLabel.Text = "Clé valide. Chargement du cheat..."
+            statusLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+            submitBtn.Text = "✓"
+            submitBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 80)
+            task.wait(0.6)
+            keyGui:Destroy()
             loadCheat()
         else
-            clearKey()
+            statusLabel.Text = msg
+            statusLabel.TextColor3 = Color3.fromRGB(255, 90, 90)
+            submitBtn.Text = "VALIDER"
+            submitBtn.BackgroundColor3 = Color3.fromRGB(240, 240, 240)
         end
     end)
 end
 
--- ============================================================
--- FENÊTRE KEYAUTH (affichée seulement si pas de clé valide)
--- ============================================================
-task.spawn(function()
-    task.wait(1.5) -- laisse le temps à la vérif auto de se faire
-
-    if not needUI then return end
-    if getgenv and getgenv().UGINFO_CHEAT_LOADED then return end
-
-    local keyGui = Instance.new("ScreenGui")
-    keyGui.Name = "UG_INFO_KeyAuth"
-    keyGui.ResetOnSpawn = false
-    keyGui.IgnoreGuiInset = true
-    keyGui.DisplayOrder = 60000
-    keyGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    keyGui.Parent = game:GetService("CoreGui")
-
-    local keyFrame = Instance.new("Frame")
-    keyFrame.Size = UDim2.new(0, 380, 0, 240)
-    keyFrame.Position = UDim2.new(0.5, -190, 0.5, -120)
-    keyFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
-    keyFrame.BorderSizePixel = 0
-    keyFrame.Active = true
-    keyFrame.Parent = keyGui
-
-    local kfCorner = Instance.new("UICorner")
-    kfCorner.CornerRadius = UDim.new(0, 14)
-    kfCorner.Parent = keyFrame
-
-    local kfStroke = Instance.new("UIStroke")
-    kfStroke.Color = Color3.fromRGB(230, 230, 230)
-    kfStroke.Thickness = 1.4
-    kfStroke.Transparency = 0.25
-    kfStroke.Parent = keyFrame
-
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, -24, 0, 32)
-    title.Position = UDim2.new(0, 12, 0, 12)
-    title.BackgroundTransparency = 1
-    title.Text = "UG INFO // RIVALS"
-    title.TextColor3 = Color3.fromRGB(245, 245, 245)
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 15
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    title.Parent = keyFrame
-
-    local brand = Instance.new("TextLabel")
-    brand.Size = UDim2.new(1, -24, 0, 20)
-    brand.Position = UDim2.new(0, 12, 0, 44)
-    brand.BackgroundTransparency = 1
-    brand.Text = "Entre ta clé pour continuer"
-    brand.TextColor3 = Color3.fromRGB(160, 160, 160)
-    brand.Font = Enum.Font.Gotham
-    brand.TextSize = 12
-    brand.TextXAlignment = Enum.TextXAlignment.Left
-    brand.Parent = keyFrame
-
-    local keyBox = Instance.new("TextBox")
-    keyBox.Size = UDim2.new(1, -24, 0, 42)
-    keyBox.Position = UDim2.new(0, 12, 0, 76)
-    keyBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    keyBox.BorderSizePixel = 0
-    keyBox.Text = ""
-    keyBox.PlaceholderText = "XXXX-XXXX-XXXX"
-    keyBox.TextColor3 = Color3.fromRGB(245, 245, 245)
-    keyBox.PlaceholderColor3 = Color3.fromRGB(100, 100, 100)
-    keyBox.Font = Enum.Font.GothamBold
-    keyBox.TextSize = 14
-    keyBox.ClearTextOnFocus = false
-    keyBox.Parent = keyFrame
-    local kbCorner = Instance.new("UICorner")
-    kbCorner.CornerRadius = UDim.new(0, 8)
-    kbCorner.Parent = keyBox
-
-    local statusLabel = Instance.new("TextLabel")
-    statusLabel.Size = UDim2.new(1, -24, 0, 20)
-    statusLabel.Position = UDim2.new(0, 12, 0, 124)
-    statusLabel.BackgroundTransparency = 1
-    statusLabel.Text = ""
-    statusLabel.TextColor3 = Color3.fromRGB(255, 90, 90)
-    statusLabel.Font = Enum.Font.Gotham
-    statusLabel.TextSize = 11
-    statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-    statusLabel.Parent = keyFrame
-
-    local submitBtn = Instance.new("TextButton")
-    submitBtn.Size = UDim2.new(1, -24, 0, 40)
-    submitBtn.Position = UDim2.new(0, 12, 0, 148)
-    submitBtn.BackgroundColor3 = Color3.fromRGB(240, 240, 240)
-    submitBtn.Text = "VALIDER"
-    submitBtn.TextColor3 = Color3.fromRGB(15, 15, 15)
-    submitBtn.Font = Enum.Font.GothamBold
-    submitBtn.TextSize = 13
-    submitBtn.AutoButtonColor = false
-    submitBtn.Parent = keyFrame
-    local sbCorner = Instance.new("UICorner")
-    sbCorner.CornerRadius = UDim.new(0, 8)
-    sbCorner.Parent = submitBtn
-
-    local function validate()
-        local key = keyBox.Text
-        if key == "" or key == "XXXX-XXXX-XXXX" then
-            statusLabel.Text = "Entre une clé valide."
-            statusLabel.TextColor3 = Color3.fromRGB(255, 90, 90)
-            return
-        end
-
-        statusLabel.Text = "Vérification..."
-        statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-        submitBtn.Text = "..."
-        submitBtn.BackgroundColor3 = Color3.fromRGB(180, 180, 180)
-
-        task.spawn(function()
-            local valid, msg = verifyKey(key)
-            if valid then
-                saveKey(key)
-                if getgenv then getgenv().UGINFO_CHEAT_LOADED = true end
-                statusLabel.Text = "Clé valide. Chargement du cheat..."
-                statusLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
-                submitBtn.Text = "✓"
-                submitBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 80)
-                task.wait(0.6)
-                keyGui:Destroy()
-                loadCheat()
-            else
-                statusLabel.Text = msg
-                statusLabel.TextColor3 = Color3.fromRGB(255, 90, 90)
-                submitBtn.Text = "VALIDER"
-                submitBtn.BackgroundColor3 = Color3.fromRGB(240, 240, 240)
-            end
-        end)
-    end
-
-    submitBtn.MouseButton1Click:Connect(validate)
-    keyBox.FocusLost:Connect(function(enterPressed)
-        if enterPressed then validate() end
-    end)
+submitBtn.MouseButton1Click:Connect(validate)
+keyBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then validate() end
 end)
