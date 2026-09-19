@@ -19,6 +19,31 @@ local MaterialService = game:GetService("MaterialService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
+-- Détection des capacités de l'executor (Xeno, Synapse, Delta, etc.)
+local EXEC = {
+    has_hookmetamethod = (hookmetamethod ~= nil),
+    has_hookfunction = (hookfunction ~= nil),
+    has_newcclosure = (newcclosure ~= nil),
+    has_getgenv = (getgenv ~= nil),
+    has_getgc = (getgc ~= nil),
+    has_getfenv = (getfenv ~= nil),
+    has_getrenv = (getrenv ~= nil),
+    has_setmetatable = (setmetatable ~= nil),
+    name = "Unknown"
+}
+
+-- Essaye de détecter le nom de l'executor
+pcall(function()
+    if syn then EXEC.name = "Synapse"
+    elseif KRNL_LOADED then EXEC.name = "Krnl"
+    elseif fluxus then EXEC.name = "Fluxus"
+    elseif secure_load then EXEC.name = "SirHurt"
+    elseif getgenv().XENO then EXEC.name = "Xeno"
+    elseif is_sirhurt_closure then EXEC.name = "SirHurt"
+    elseif identifyexecutor then EXEC.name = identifyexecutor()
+    end
+end)
+
 Library.ShowToggleFrameInKeybinds = true
 
 local Window = Library:CreateWindow({
@@ -107,7 +132,7 @@ local Tabs = {
     Aim = Window:AddTab("Aim", "crosshair"),
     Visuals = Window:AddTab("Visuals", "eye"),
     Effects = Window:AddTab("Effects", "sparkles"),
-    Changer = Window:AddTab("Changer", "box"),
+    UnlockAll = Window:AddTab("Unlock All", "box"),
     Misc = Window:AddTab("Misc", "settings"),
     Settings = Window:AddTab("Settings", "wrench"),
 }
@@ -393,169 +418,331 @@ local function playSound(id, vol)
 end
 
 -- =============================================
--- SKIN CHANGER
+-- UNLOCK ALL (adapté pour Xeno et autres executors)
 -- =============================================
-local SkinChanger = {
-    skinFolders = {},
-    viewModelsPath = nil,
-    backupFolder = nil,
-    InitializeViewModelsPath = function(self)
-        local player = game:GetService("Players").LocalPlayer
-        if not (player and player.PlayerScripts) then return false end
-        local success, result = pcall(function() return player.PlayerScripts.Assets.ViewModels.Weapons end)
-        if success and result then self.viewModelsPath = result; return true end
-        local success2, result2 = pcall(function() return player.PlayerScripts.Assets.ViewModels end)
-        if not (success2 and result2) then return false end
-        local weaponsFolder = Instance.new("Folder")
-        weaponsFolder.Name = "Weapons"
-        weaponsFolder.Parent = result2
-        self.viewModelsPath = weaponsFolder
-        return true
-    end,
-    DiscoverSkinFolders = function(self)
-        if not (self.viewModelsPath or self:InitializeViewModelsPath()) then return false end
-        local folderNames = {["Spooky Skin Case"] = "Spooky Skin Case",["Skin Case 2"] = "Skin Case 2",["Skin Case 3"] = "Skin Case 3",["Skin Case"] = "Skin Case",Other = "Other",["Festive Skin Case"] = "Festive Skin Case"}
-        local foundAny = false
-        for displayName, folderName in pairs(folderNames) do
+local UnlockAll = {
+    initialized = false,
+    running = false,
+}
+
+local function runUnlockAll()
+    if UnlockAll.running then
+        Library:Notify({Title = "Unlock All", Description = "Already running, please wait...", Time = 3})
+        return
+    end
+    
+    UnlockAll.running = true
+    Library:Notify({Title = "Unlock All", Description = "Starting... (" .. EXEC.name .. ")", Time = 3})
+    
+    task.spawn(function()
+        -- AC Bypass : seulement si hookfunction + newcclosure dispo
+        if EXEC.has_hookfunction and EXEC.has_newcclosure and EXEC.has_getrenv then
             pcall(function()
-                local folder = self.viewModelsPath:FindFirstChild(folderName)
-                if folder then self.skinFolders[displayName] = folder; foundAny = true end
+                local _stbl
+                _stbl = hookfunction(getrenv().setmetatable, newcclosure(function(tbl, mt)
+                    if mt and typeof(mt) == "table" and rawget(mt, "__mode") == "kv" then
+                        local tr = debug.traceback()
+                        if tr:find("MiscellaneousController") then
+                            return _stbl({1,2,3}, {})
+                        end
+                    end
+                    return _stbl(tbl, mt)
+                end))
+            end)
+        else
+            -- Fallback pour Xeno : on désactive juste les scripts AC
+            pcall(function()
+                local function _proc(o)
+                    pcall(function()
+                        if o:IsA("LocalScript") or o:IsA("ModuleScript") then
+                            local nm = o.Name:lower()
+                            local _tags = {"anticheat","detection","ban","kick","security","moderation"}
+                            for _i = 1, #_tags do
+                                if nm:find(_tags[_i]) then
+                                    pcall(function() o.Disabled = true end)
+                                    break
+                                end
+                            end
+                        end
+                    end)
+                end
+                for _, o in ipairs(game:GetDescendants()) do _proc(o) end
+                game.DescendantAdded:Connect(_proc)
             end)
         end
-        return foundAny
-    end,
-    UseHardcodedPaths = function(self)
-        local player = game:GetService("Players").LocalPlayer
-        if not (player and player.PlayerScripts) then return false end
-        local paths = {["Spooky Skin Case"] = player.PlayerScripts.Assets.ViewModels:FindFirstChild("Spooky Skin Case"),["Skin Case 2"] = player.PlayerScripts.Assets.ViewModels:FindFirstChild("Skin Case 2"),["Skin Case"] = player.PlayerScripts.Assets.ViewModels:FindFirstChild("Skin Case"),Other = player.PlayerScripts.Assets.ViewModels:FindFirstChild("Other"),["Festive Skin Case"] = player.PlayerScripts.Assets.ViewModels:FindFirstChild("Festive Skin Case")}
-        local foundAny = false
-        for displayName, folder in pairs(paths) do
-            pcall(function()
-                if folder then self.skinFolders[displayName] = folder; foundAny = true end
-            end)
-        end
-        return foundAny
-    end,
-    FindSkinModel = function(self, skinName)
-        if not skinName then return nil end
-        for _, folder in pairs(self.skinFolders) do
-            if folder then
-                local success, model = pcall(function()
-                    if folder:IsA("Folder") then return folder:FindFirstChild(skinName) else return nil end
-                end)
-                if success and model then return model end
+        
+        -- Désactive les AC dans ReplicatedFirst
+        pcall(function()
+            local _rf = game:GetService("ReplicatedFirst")
+            local _tgt = _rf:FindFirstChild("LocalScript3")
+            if not _tgt then return end
+            
+            if EXEC.has_getgc and EXEC.has_hookfunction then
+                local _gc = getgc(false)
+                for _i = 1, #_gc do
+                    local _fn = _gc[_i]
+                    if type(_fn) ~= "function" then continue end
+                    local _ok1, _env = pcall(getfenv, _fn)
+                    if not _ok1 or type(_env) ~= "table" then continue end
+                    local _ok2, _scr = pcall(function() return rawget(_env, "script") end)
+                    if not _ok2 or not _scr or typeof(_scr) ~= "Instance" then continue end
+                    local _ok3, _ss = pcall(tostring, _scr)
+                    if not _ok3 then continue end
+                    if not (_scr == _tgt or (type(_ss) == "string" and _ss:find("LoadingScreen"))) then continue end
+                    local _ok4, _consts = pcall(debug.getconstants, _fn)
+                    if not _ok4 or type(_consts) ~= "table" then continue end
+                    for _j = 1, #_consts do
+                        local _c = _consts[_j]
+                        if type(_c) == "string" and (_c:find("TakeTheL") or _c:find("ban") or _c:find("kick")) then
+                            pcall(function()
+                                hookfunction(_fn, function() end)
+                            end)
+                            break
+                        end
+                    end
+                end
             end
-        end
-        return nil
-    end,
-    GetOrCreateBackupFolder = function(self)
-        if self.backupFolder and self.backupFolder.Parent then return self.backupFolder end
-        if not (self.viewModelsPath or self:InitializeViewModelsPath()) then return nil end
-        local success, folder = pcall(function()
-            local backup = self.viewModelsPath:FindFirstChild("OriginalBackups")
-            if not backup then
-                backup = Instance.new("Folder")
-                backup.Name = "OriginalBackups"
-                backup.Parent = self.viewModelsPath
-            end
-            return backup
         end)
-        if not success then return nil end
-        self.backupFolder = folder
-        return folder
-    end,
-    ApplySkinModel = function(self, weaponName, skinName)
-        if not (self.viewModelsPath or self:InitializeViewModelsPath()) then return false, "Couldn't find your weapons. Try restarting the game!" end
-        local weaponModel = self.viewModelsPath:FindFirstChild(weaponName)
-        if not (weaponModel and weaponModel:IsA("Model")) then return false, "Couldn't find the " .. weaponName .. " model. Try a different weapon!" end
-        local skinModel = self:FindSkinModel(skinName)
-        if not skinModel then return false, "Couldn't find the " .. skinName .. " skin. Try a different skin!" end
-        local backupFolder = self:GetOrCreateBackupFolder()
-        if not backupFolder then return false, "Couldn't create a backup. Try restarting the game!" end
-        local backupName = weaponName .. "_Original"
-        if not backupFolder:FindFirstChild(backupName) then
-            local backup = weaponModel:Clone()
-            backup.Name = backupName
-            backup.Parent = backupFolder
+        
+        task.wait(2)
+        
+        -- Chargement des modules du jeu
+        local _rs = game:GetService("ReplicatedStorage")
+        local _http = game:GetService("HttpService")
+        local _lp = game:GetService("Players").LocalPlayer
+        local _pscripts = _lp.PlayerScripts
+        local _ctrl = _pscripts:FindFirstChild("Controllers")
+        local _mods = _rs:FindFirstChild("Modules")
+        
+        if not _ctrl or not _mods then
+            Library:Notify({Title = "Unlock All", Description = "Game modules not found. Wait for the game to load.", Time = 5})
+            UnlockAll.running = false
+            return
         end
-        weaponModel:Destroy()
-        local newSkin = skinModel:Clone()
-        newSkin.Name = weaponName
-        newSkin.Parent = self.viewModelsPath
-        return true, "Success! Your " .. weaponName .. " now has the " .. skinName .. " skin!"
-    end,
-    ResetSkinModel = function(self, weaponName)
-        if not (self.viewModelsPath or self:InitializeViewModelsPath()) then return false, "Couldn't find your weapons. Try restarting the game!" end
-        local backupFolder = self:GetOrCreateBackupFolder()
-        if not backupFolder then return false, "Couldn't find your weapon backups. Try applying a skin first!" end
-        local backup = backupFolder:FindFirstChild(weaponName .. "_Original")
-        if not backup then return false, "No backup found for " .. weaponName .. ". Try applying a skin first!" end
-        local currentWeapon = self.viewModelsPath:FindFirstChild(weaponName)
-        if currentWeapon then currentWeapon:Destroy() end
-        local restored = backup:Clone()
-        restored.Name = weaponName
-        restored.Parent = self.viewModelsPath
-        return true, "Your " .. weaponName .. " is back to normal!"
-    end
-}
-
-local WeaponData = {
-    ["Assault Rifle"] = {"AK-47", "AKEY-47", "Boneclaw Rifle", "AUG", "Phoenix Rifle", "Gingerbread AUG", "Tommy Gun"},
-    ["Battle Axe"] = {"The Shred", "Nordic Axe", "Ban Axe"},
-    ["Burst Rifle"] = {"Aqua Burst", "Electro Rifle", "Pixel Burst", "Pine Burst", "Spectral Burst", "FAMAS"},
-    Chainsaw = {"Blobsaw"},
-    Bow = {"Compound Bow", "Bat Bow"},
-    Crossbow = {"Pixel Crossbow", "Frostbite Crossbow"},
-    Daggers = {"Aces", "Cookies"},
-    ["Energy Rifle"] = {"2025 Energy Rifle", "Apex Rifle", "Hacker Rifle", "Hydro Rifle"},
-    ["Energy Pistols"] = {"2025 Energy Pistols", "Apex Pistols", "Hacker Pistols", "Void Pistols"},
-    Exogun = {"Ray Gun", "Singularity", "Wondergun", "Repulsor", "Exogourd", "Midnight Festive Exogun"},
-    Fists = {"Boxing Gloves", "Brass Knuckles", "Pumpkin Claws", "Festive Fists", "Fists of Hurt"},
-    Flamethrower = {"Lamethrower", "Pixel Flamethrower", "Snowblower", "Glitterthrower"},
-    ["Flare Gun"] = {"Dynamite Gun", "Firework Gun", "Banana Flare", "Wrapped Flare Gun", "Vexed Flare Gun"},
-    ["Freeze Ray"] = {"Bubble Ray", "Temporal Ray", "Spider Ray", "Gum Ray", "Wrapped Freeze Ray"},
-    Grenade = {"Water Balloon", "Whoopee Cushion", "Soul Grenade", "Jingle Grenade", "Dynamite"},
-    ["Grenade Launcher"] = {"Swashbuckler", "Uranium Launcher", "Skull Launcher", "Snowball Launcher", "Gearnade Launcher"},
-    Gunblade = {"Hyper Gunblade", "Crude Gunblade", "Elf's Gunblade"},
-    Handgun = {"Blaster", "Pixel Handgun", "Pumpkin Handgun", "Gingerbread Handgun", "Gumball Handgun"},
-    Katana = {"Lightning Bolt", "Saber", "Pixel Katana", "Devil's Trident", "2025 Katana", "Keytana", "Stellar Katana"},
-    Knife = {"Chancla", "Karambit", "Machete", "Candy Cane", "Balisong"},
-    Minigun = {"Lasergun 3000", "Pixel Minigun", "Wrapped Minigun", "Pumpkin Minigun", "Fighter Jet"},
-    ["Riot Shield"] = {"Energy Shield", "Door", "Sled", ""},
-    Molotov = {"Coffee", "Torch", "Vexed Candle", "Lava Lamp"},
-    ["Paintball Gun"] = {"Boba Gun", "Slime Gun", "Brain Gun", "Snowball Gun", "Ketchup Gun"},
-    Revolver = {"Boneclaw Revolver"},
-    RPG = {"Nuke Launcher"},
-    Scythe = {"Anchor", "Keythe", "Scythe of Death", "Bat Scythe", "Cryo Scythe", "Sakura Scythe"},
-    Shorty = {"Lovely Shorty", "Not So Shorty", "Too Shorty", "Demon Shorty", "Balloon Shorty", "Wrapped Shorty"},
-    Shotgun = {"Balloon Shotgun", "Hyper Shotgun", "Wrapped Shotgun", "Broomstick"},
-    Slingshot = {"Goalpost", "Stick", "Boneshot", "Reindeer Slingshot"},
-    ["Smoke Grenade"] = {"Balance", "Emoji Cloud", "Eyeball", "Hourglass", "Snowglobe"},
-    Sniper = {"Hyper Sniper", "Pixel Sniper", "Keyper", "Gingerbread Sniper", "Eyething Sniper", "Event Horizon"},
-    ["Subspace Tripmine"] = {"Don't Press", "Spring", "DIY Tripmine", "Dev-in-the-Box", "Trick or Treat"},
-    Spray = {"Lovely Spray", "Pine Spray", "Nail Gun"},
-    Trowel = {"Garden Shovel", "Plastic Shovel", "Snow Shovel", "Pumpkin Carver", "Paintbrush"},
-    Uzi = {"Electro Uzi", "Water Uzi", "Pine Uzi", "Demon Uzi", "Money Gun"},
-    Flashbang = {"Camera", "Disco Ball", "Pixel Flashbang", "Skullbang", "Lightbulb", "Shining Star"},
-    Medkit = {"Briefcase", "Laptop", "Medkitty", "Sandwich", "Bucket of Candy"},
-    ["Jump Pad"] = {"Bounce House"},
-    ["War Horn"] = {"Trumpet", "Mammoth Horn", "Megaphone"}
-}
-
-local WeaponList = {}
-for weapon in pairs(WeaponData) do
-    table.insert(WeaponList, weapon)
+        
+        local _enumLib = require(_mods:WaitForChild("EnumLibrary", 10))
+        if _enumLib then pcall(function() _enumLib:WaitForEnumBuilder() end) end
+        local _cosLib = require(_mods:WaitForChild("CosmeticLibrary", 10))
+        local _datCtrl = require(_ctrl:WaitForChild("PlayerDataController", 10))
+        
+        local _eq, _favs = {}, {}
+        local _buildingWep = nil
+        local _lastWep = nil
+        
+        local function _mkCosmetic(nm, ctype, opts)
+            local _base = _cosLib.Cosmetics[nm]
+            if not _base then return nil end
+            local _d = {}
+            for k, v in pairs(_base) do _d[k] = v end
+            _d.Name = nm
+            _d.Type = _d.Type or ctype
+            _d.Seed = _d.Seed or math.random(1, 1000000)
+            if _enumLib then
+                local _s, _eid = pcall(_enumLib.ToEnum, _enumLib, nm)
+                if _s and _eid then
+                    _d.Enum = _eid
+                    _d.ObjectID = _d.ObjectID or _eid
+                end
+            end
+            return _d
+        end
+        
+        local _cfgFile = "rivals_unlocker_config.json"
+        local _saveLock = false
+        
+        local function _saveCfg()
+            if not writefile or _saveLock then return end
+            _saveLock = true
+            task.spawn(function()
+                task.wait(1)
+                local _out = {}
+                for wn, cos in pairs(_eq) do
+                    _out[wn] = {}
+                    for ct, cd in pairs(cos) do
+                        if cd and cd.Name then
+                            _out[wn][ct] = { Name = cd.Name }
+                        end
+                    end
+                end
+                local _ok, _enc = pcall(_http.JSONEncode, _http, { equipped = _out, favorites = _favs })
+                if _ok then pcall(writefile, _cfgFile, _enc) end
+                _saveLock = false
+            end)
+        end
+        
+        local _cosTypes = {"Skin","Wrap","Charm","Dance","Emote"}
+        local function _isCosType(cosObj)
+            if not cosObj then return false end
+            for _, t in ipairs(_cosTypes) do
+                if cosObj.Type == t then return true end
+            end
+            return false
+        end
+        
+        -- Override OwnsCosmetic
+        pcall(function()
+            _cosLib.OwnsCosmeticNormally = function(self, inv, nm, wep)
+                local c = _cosLib.Cosmetics[nm]
+                if c and c.Type == "Skin" then return true end
+                return false
+            end
+            _cosLib.OwnsCosmeticUniversally = function(self, inv, nm, wep)
+                local c = _cosLib.Cosmetics[nm]
+                if c and c.Type == "Skin" then return true end
+                return false
+            end
+            _cosLib.OwnsCosmeticForWeapon = function(self, inv, nm, wep)
+                local c = _cosLib.Cosmetics[nm]
+                if c and c.Type == "Skin" then return true end
+                return false
+            end
+            local _origOwns = _cosLib.OwnsCosmetic
+            _cosLib.OwnsCosmetic = function(self, inv, nm, wep)
+                if nm:find("MISSING_") or nm == "Bubble Gun" then
+                    return _origOwns(self, inv, nm, wep)
+                end
+                local c = _cosLib.Cosmetics[nm]
+                if c and _isCosType(c) then return true end
+                return _origOwns(self, inv, nm, wep)
+            end
+        end)
+        
+        -- Override PlayerDataController.Get
+        pcall(function()
+            local _origGet = _datCtrl.Get
+            _datCtrl.Get = function(self, key)
+                local _val = _origGet(self, key)
+                if key == "CosmeticInventory" then
+                    local _prx = {}
+                    if _val then
+                        for k, v in pairs(_val) do
+                            local c = _cosLib.Cosmetics[k]
+                            if c and _isCosType(c) then _prx[k] = v end
+                        end
+                    end
+                    return setmetatable(_prx, {
+                        __index = function(t, k)
+                            local c = _cosLib.Cosmetics[k]
+                            if c and _isCosType(c) then return true end
+                            return nil
+                        end
+                    })
+                end
+                if key == "FavoritedCosmetics" then
+                    local _res = _val and table.clone(_val) or {}
+                    for wep, fv in pairs(_favs) do
+                        _res[wep] = _res[wep] or {}
+                        for nm, isFav in pairs(fv) do
+                            local c = _cosLib.Cosmetics[nm]
+                            if c and _isCosType(c) then _res[wep][nm] = isFav end
+                        end
+                    end
+                    return _res
+                end
+                return _val
+            end
+            
+            local _origGetWep = _datCtrl.GetWeaponData
+            _datCtrl.GetWeaponData = function(self, wn)
+                local _d = _origGetWep(self, wn)
+                if not _d then return nil end
+                local _m = {}
+                for k, v in pairs(_d) do _m[k] = v end
+                _m.Name = wn
+                if _eq[wn] then
+                    for ct, cd in pairs(_eq[wn]) do _m[ct] = cd end
+                end
+                return _m
+            end
+        end)
+        
+        -- Hook du __namecall (si supporté) ou fallback
+        pcall(function()
+            local _remotes = _rs:FindFirstChild("Remotes")
+            local _dataRem = _remotes and _remotes:FindFirstChild("Data")
+            local _equipRem = _dataRem and _dataRem:FindFirstChild("EquipCosmetic")
+            
+            if _equipRem and EXEC.has_hookmetamethod then
+                local _onc
+                _onc = hookmetamethod(game, "__namecall", function(self, ...)
+                    if getnamecallmethod() ~= "FireServer" then return _onc(self, ...) end
+                    local _a = {...}
+                    if self == _equipRem then
+                        local _wn = _a[1]
+                        local _ct = _a[2]
+                        local _cn = _a[3]
+                        if _cn and _cn ~= "None" and _cn ~= "" then
+                            _eq[_wn] = _eq[_wn] or {}
+                            local _cloned = _mkCosmetic(_cn, _ct)
+                            if _cloned then _eq[_wn][_ct] = _cloned end
+                            task.defer(function()
+                                pcall(function() _datCtrl.CurrentData:Replicate("WeaponInventory") end)
+                            end)
+                            _saveCfg()
+                        end
+                        return
+                    end
+                    return _onc(self, ...)
+                end)
+            end
+        end)
+        
+        -- ClientItem hook
+        pcall(function()
+            local _cliItem = require(_pscripts.Modules.ClientReplicatedClasses.ClientFighter.ClientItem)
+            if _cliItem and _cliItem._CreateViewModel then
+                local _origCVM = _cliItem._CreateViewModel
+                _cliItem._CreateViewModel = function(self, vmRef)
+                    local _wn = self.Name
+                    local _wp = self.ClientFighter and self.ClientFighter.Player
+                    _buildingWep = (_wp == _lp) and _wn or nil
+                    if _wp == _lp and _eq[_wn] then
+                        local _dk = self:ToEnum("Data")
+                        if vmRef[_dk] then
+                            if _eq[_wn].Skin then
+                                vmRef[_dk][self:ToEnum("Skin")] = _eq[_wn].Skin
+                                vmRef[_dk][self:ToEnum("Name")] = _eq[_wn].Skin.Name
+                            end
+                            if _eq[_wn].Charm then vmRef[_dk][self:ToEnum("Charm")] = _eq[_wn].Charm end
+                            if _eq[_wn].Wrap then vmRef[_dk][self:ToEnum("Wrap")] = _eq[_wn].Wrap end
+                        elseif vmRef.Data then
+                            if _eq[_wn].Skin then vmRef.Data.Skin = _eq[_wn].Skin; vmRef.Data.Name = _eq[_wn].Skin.Name end
+                            if _eq[_wn].Charm then vmRef.Data.Charm = _eq[_wn].Charm end
+                            if _eq[_wn].Wrap then vmRef.Data.Wrap = _eq[_wn].Wrap end
+                        end
+                    end
+                    local _r = _origCVM(self, vmRef)
+                    _buildingWep = nil
+                    return _r
+                end
+            end
+            
+            local _vmMod = _pscripts.Modules.ClientReplicatedClasses.ClientFighter.ClientItem:FindFirstChild("ClientViewModel")
+            if _vmMod then
+                local _CVM = require(_vmMod)
+                local _origNew = _CVM.new
+                _CVM.new = function(repData, cliItm)
+                    local _wp = cliItm.ClientFighter and cliItm.ClientFighter.Player
+                    local _wn = _buildingWep or cliItm.Name
+                    if _wp == _lp and _eq[_wn] then
+                        local _RC = require(_rs.Modules.ReplicatedClass)
+                        local _dk = _RC:ToEnum("Data")
+                        repData[_dk] = repData[_dk] or {}
+                        local _cos = _eq[_wn]
+                        if _cos.Skin then repData[_dk][_RC:ToEnum("Skin")] = _cos.Skin end
+                        if _cos.Charm then repData[_dk][_RC:ToEnum("Charm")] = _cos.Charm end
+                        if _cos.Wrap then repData[_dk][_RC:ToEnum("Wrap")] = _cos.Wrap end
+                    end
+                    return _origNew(repData, cliItm)
+                end
+            end
+        end)
+        
+        Library:Notify({Title = "Unlock All", Description = "All cosmetics unlocked!", Time = 5})
+        UnlockAll.initialized = true
+        UnlockAll.running = false
+    end)
 end
-table.sort(WeaponList)
-
-local CurrentWeapon = WeaponList[1] or "No Weapons Found"
-local CurrentSkin = (CurrentWeapon == "No Weapons Found" and "No Skins Found") or ((WeaponData[CurrentWeapon] or {})[1] or "No Skins Found")
-
-task.spawn(function()
-    if not (SkinChanger:DiscoverSkinFolders() or SkinChanger:UseHardcodedPaths()) then
-        Library:Notify({Title = "Notice", Description = "Couldn't find skin folders. Try restarting the game!", Time = 5})
-    end
-end)
 
 -- =============================================
 -- SKYBOX FUNCTIONS
@@ -1688,189 +1875,19 @@ SndBox:AddToggle("ShootFXOn", { Text = "Shoot Effects", Default = false })
 SndBox:AddDropdown("ShootFXStyle", { Values = ShootFXStyles, Default = "Bubbles", Text = "Shoot Style" })
 
 -- =============================================
--- TAB 4: CHANGER
+-- TAB 4: UNLOCK ALL (bouton unique)
 -- =============================================
-local ChangerLeft = Tabs.Changer:AddLeftGroupbox("Skin Changer")
-ChangerLeft:AddLabel("Welcome to Cul Hook Skin Changer", true)
-ChangerLeft:AddLabel("Follow these steps: 1. Pick a weapon 2. Pick a skin 3. Click Apply", true)
-ChangerLeft:AddDivider()
-ChangerLeft:AddLabel("Step 1: Select Weapon", true)
+local UnlockBox = Tabs.UnlockAll:AddLeftGroupbox("Unlock All")
+UnlockBox:AddLabel("Executor detected: " .. EXEC.name, true)
+UnlockBox:AddLabel("Click below to unlock all skins, wraps, charms, dances and emotes.", true)
+UnlockBox:AddDivider()
 
-local WeaponDropdown = ChangerLeft:AddDropdown("WeaponSelect", {
-    Values = WeaponList,
-    Default = CurrentWeapon,
-    Multi = false,
-    Text = "Select Weapon",
-    Tooltip = "Choose the weapon you want to modify",
-    Callback = function(value)
-        CurrentWeapon = value
-        local skins = WeaponData[CurrentWeapon] or {}
-        if #skins <= 0 then
-            CurrentSkin = "No Skins Found"
-            Options.SkinSelect:SetValue("No Skins Found")
-        else
-            CurrentSkin = skins[1]
-            Options.SkinSelect:SetValue(CurrentSkin)
-        end
-    end
-})
-
-ChangerLeft:AddLabel("Step 2: Select Skin", true)
-
-local SkinDropdown = ChangerLeft:AddDropdown("SkinSelect", {
-    Values = WeaponData[CurrentWeapon] or {"No Skins Found"},
-    Default = CurrentSkin,
-    Multi = false,
-    Text = "Select Skin",
-    Tooltip = "Choose the skin you want to apply",
-    Callback = function(value) CurrentSkin = value end
-})
-
-ChangerLeft:AddLabel("Step 3: Apply Selection", true)
-
-ChangerLeft:AddButton({
-    Text = "Apply Skin",
+UnlockBox:AddButton({
+    Text = "Unlock All",
     Func = function()
-        if CurrentWeapon == "No Weapons Found" or CurrentSkin == "No Skins Found" then
-            Library:Notify({Title = "Error", Description = "Please select a weapon and a skin before applying.", Time = 3})
-        else
-            local success, message = SkinChanger:ApplySkinModel(CurrentWeapon, CurrentSkin)
-            Library:Notify({Title = success and "Success" or "Error", Description = message, Time = success and 3 or 5})
-        end
+        runUnlockAll()
     end,
-    Tooltip = "Click to apply the selected skin to your weapon"
-})
-
-ChangerLeft:AddDivider()
-ChangerLeft:AddLabel("Reset Options", true)
-
-ChangerLeft:AddButton({
-    Text = "Reset Current Weapon",
-    Func = function()
-        if CurrentWeapon ~= "No Weapons Found" then
-            local success, message = SkinChanger:ResetSkinModel(CurrentWeapon)
-            Library:Notify({Title = success and "Success" or "Error", Description = message, Time = success and 3 or 5})
-        else
-            Library:Notify({Title = "Error", Description = "Please select a weapon to reset.", Time = 3})
-        end
-    end,
-    Tooltip = "Revert the selected weapon to its original model"
-})
-
-ChangerLeft:AddButton({
-    Text = "Reset All Weapons",
-    Func = function()
-        local backupFolder = SkinChanger:GetOrCreateBackupFolder()
-        if backupFolder then
-            local successCount = 0
-            local failCount = 0
-            for _, backup in ipairs(backupFolder:GetChildren()) do
-                if backup:IsA("Model") and backup.Name:match("_Original$") then
-                    local weaponName = backup.Name:gsub("_Original$", "")
-                    local success = pcall(function()
-                        local current = SkinChanger.viewModelsPath:FindFirstChild(weaponName)
-                        if current then current:Destroy() end
-                        local restored = backup:Clone()
-                        restored.Name = weaponName
-                        restored.Parent = SkinChanger.viewModelsPath
-                    end)
-                    if success then successCount = successCount + 1 else failCount = failCount + 1 end
-                end
-            end
-            if successCount > 0 then
-                Library:Notify({Title = "Reset Complete", Description = "Restored " .. successCount .. " weapons" .. (failCount > 0 and " (" .. failCount .. " failed)" or ""), Time = 4})
-            else
-                Library:Notify({Title = "Information", Description = "No modified weapons found to reset.", Time = 3})
-            end
-        else
-            Library:Notify({Title = "Error", Description = "No backups found. Apply a skin first before using this.", Time = 3})
-        end
-    end,
-    Tooltip = "Revert all modified weapons to their original models (double-click)",
-    DoubleClick = true
-})
-
-ChangerLeft:AddDivider()
-ChangerLeft:AddLabel("Find Your Favorite Skins", true)
-
-ChangerLeft:AddInput("SearchInput", {
-    Default = "",
-    Numeric = false,
-    Finished = false,
-    Text = "Search Weapons and Skins",
-    Tooltip = "Enter a weapon or skin name to filter options",
-    Placeholder = "Example: AK-47, Knife, Pixel...",
-    Callback = function(searchText)
-        local search = searchText:lower()
-        if search == "" then
-            Options.WeaponSelect:SetValues(WeaponList)
-            Options.WeaponSelect:SetValue(CurrentWeapon)
-            local skins = WeaponData[CurrentWeapon] or {}
-            if #skins <= 0 then
-                Options.SkinSelect:SetValues({"No Skins Found"})
-                Options.SkinSelect:SetValue("No Skins Found")
-            else
-                Options.SkinSelect:SetValues(skins)
-                Options.SkinSelect:SetValue(CurrentSkin)
-            end
-        else
-            local matchedWeapons = {}
-            for _, weapon in ipairs(WeaponList) do
-                if weapon:lower():find(search) then table.insert(matchedWeapons, weapon) end
-            end
-            local weaponsWithSkinMatches = {}
-            local skinMatches = {}
-            for weapon, skins in pairs(WeaponData) do
-                local matchedSkins = {}
-                for _, skin in ipairs(skins) do
-                    if skin:lower():find(search) then
-                        table.insert(matchedSkins, skin)
-                        if not table.find(weaponsWithSkinMatches, weapon) then
-                            table.insert(weaponsWithSkinMatches, weapon)
-                        end
-                    end
-                end
-                if #matchedSkins > 0 then skinMatches[weapon] = matchedSkins end
-            end
-            local results = {}
-            for _, weapon in ipairs(matchedWeapons) do
-                if not table.find(results, weapon) then table.insert(results, weapon) end
-            end
-            for _, weapon in ipairs(weaponsWithSkinMatches) do
-                if not table.find(results, weapon) then table.insert(results, weapon) end
-            end
-            if #results <= 0 then
-                Options.WeaponSelect:SetValues({"No Matches Found"})
-                Options.WeaponSelect:SetValue("No Matches Found")
-                Options.SkinSelect:SetValues({"No Matches Found"})
-                Options.SkinSelect:SetValue("No Matches Found")
-                CurrentWeapon = "No Matches Found"
-                CurrentSkin = "No Matches Found"
-            else
-                Options.WeaponSelect:SetValues(results)
-                if table.find(results, CurrentWeapon) then
-                    if skinMatches[CurrentWeapon] then
-                        Options.SkinSelect:SetValues(skinMatches[CurrentWeapon])
-                        CurrentSkin = skinMatches[CurrentWeapon][1]
-                        Options.SkinSelect:SetValue(CurrentSkin)
-                    end
-                else
-                    CurrentWeapon = results[1]
-                    Options.WeaponSelect:SetValue(CurrentWeapon)
-                    if skinMatches[CurrentWeapon] then
-                        Options.SkinSelect:SetValues(skinMatches[CurrentWeapon])
-                        CurrentSkin = skinMatches[CurrentWeapon][1]
-                        Options.SkinSelect:SetValue(CurrentSkin)
-                    else
-                        local skins = WeaponData[CurrentWeapon] or {"No Skins Found"}
-                        Options.SkinSelect:SetValues(skins)
-                        CurrentSkin = skins[1]
-                        Options.SkinSelect:SetValue(CurrentSkin)
-                    end
-                end
-            end
-        end
-    end
+    Tooltip = "Unlocks all cosmetics in the game"
 })
 
 -- =============================================
@@ -2072,7 +2089,6 @@ RunService.Heartbeat:Connect(function()
         end)
     end
     
-    -- LIGHTING : n'applique que si un toggle correspondant est actif
     local ambienceActive = Toggles.AmbienceOn.Value and CurrentAmbience
     
     if Toggles.FullBright.Value then
@@ -2105,7 +2121,6 @@ RunService.Heartbeat:Connect(function()
         Lighting.ClockTime = OrigLighting.ClockTime
     end
     
-    -- COLOR CORRECTION : uniquement si l'utilisateur change les valeurs
     local ccActive = (Options.ColorSat.Value ~= 1) or (Options.ColorCon.Value ~= 0.5) or (Options.ColorBri.Value ~= 1)
     pcall(function()
         if ccActive then
@@ -2122,7 +2137,6 @@ RunService.Heartbeat:Connect(function()
         end
     end)
     
-    -- BLOOM : uniquement si intensité > 0
     pcall(function()
         if Options.BloomInt.Value > 0 then
             if not BloomEffect then
