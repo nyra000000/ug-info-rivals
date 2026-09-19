@@ -349,7 +349,6 @@ local function getBones(ch)
     return {}
 end
 
--- CORRECTION : isVisible prend une BasePart, pas une Vector3
 local function isVisible(from, targetPart)
     if not targetPart then return false end
     local rp = RaycastParams.new()
@@ -1030,7 +1029,6 @@ local function findTarget()
         local part = getPart(ch, Options.AimPart.Value)
         if not part then continue end
         if dist3(camP, part.Position) > Options.AimDist.Value then continue end
-        -- CORRECTION : on passe la part, pas la position
         if Toggles.AimVisCheck.Value and not isVisible(camP, part) then continue end
         local sp, on = Camera:WorldToViewportPoint(part.Position)
         if on then
@@ -2074,11 +2072,14 @@ RunService.Heartbeat:Connect(function()
         end)
     end
     
+    -- LIGHTING : n'applique que si un toggle correspondant est actif
+    local ambienceActive = Toggles.AmbienceOn.Value and CurrentAmbience
+    
     if Toggles.FullBright.Value then
         Lighting.Ambient = Color3.new(1, 1, 1)
         Lighting.Brightness = 2
         Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
-    elseif not Toggles.AmbienceOn.Value or not CurrentAmbience then
+    elseif not ambienceActive and not Toggles.NoShadows.Value then
         Lighting.Ambient = OrigLighting.Ambient
         Lighting.Brightness = OrigLighting.Brightness
         Lighting.OutdoorAmbient = OrigLighting.OutdoorAmbient
@@ -2086,33 +2087,42 @@ RunService.Heartbeat:Connect(function()
     
     if Toggles.NoFog.Value then
         Lighting.FogEnd = 1e9
-    elseif not Toggles.AmbienceOn.Value or not CurrentAmbience then
+    elseif not ambienceActive then
         Lighting.FogEnd = OrigLighting.FogEnd
     end
     
     if Toggles.NoShadows.Value then
         Lighting.GlobalShadows = false
-    elseif not Toggles.AmbienceOn.Value or not CurrentAmbience then
+    elseif not ambienceActive then
         Lighting.GlobalShadows = OrigLighting.GlobalShadows
     end
     
-    if Toggles.ForceDay.Value and not (Toggles.AmbienceOn.Value and CurrentAmbience) then
+    if Toggles.ForceDay.Value and not ambienceActive then
         Lighting.ClockTime = 14
-    end
-    if Toggles.ForceNight.Value and not (Toggles.AmbienceOn.Value and CurrentAmbience) then
+    elseif Toggles.ForceNight.Value and not ambienceActive then
         Lighting.ClockTime = 0
+    elseif not ambienceActive then
+        Lighting.ClockTime = OrigLighting.ClockTime
     end
     
+    -- COLOR CORRECTION : uniquement si l'utilisateur change les valeurs
+    local ccActive = (Options.ColorSat.Value ~= 1) or (Options.ColorCon.Value ~= 0.5) or (Options.ColorBri.Value ~= 1)
     pcall(function()
-        if not ColorCorrection then
-            ColorCorrection = Instance.new("ColorCorrectionEffect", Lighting)
-            ColorCorrection.Name = "OCC"
+        if ccActive then
+            if not ColorCorrection then
+                ColorCorrection = Instance.new("ColorCorrectionEffect", Lighting)
+                ColorCorrection.Name = "OCC"
+            end
+            ColorCorrection.Saturation = Options.ColorSat.Value
+            ColorCorrection.Contrast = Options.ColorCon.Value * 2
+            ColorCorrection.Brightness = Options.ColorBri.Value - 1
+        elseif ColorCorrection then
+            ColorCorrection:Destroy()
+            ColorCorrection = nil
         end
-        ColorCorrection.Saturation = Options.ColorSat.Value
-        ColorCorrection.Contrast = Options.ColorCon.Value * 2
-        ColorCorrection.Brightness = Options.ColorBri.Value - 1
     end)
     
+    -- BLOOM : uniquement si intensité > 0
     pcall(function()
         if Options.BloomInt.Value > 0 then
             if not BloomEffect then
