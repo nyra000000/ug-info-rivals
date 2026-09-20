@@ -15,11 +15,9 @@ local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 local HasDrawing = pcall(function() return Drawing.new end)
 local HttpService = game:GetService("HttpService")
-local MaterialService = game:GetService("MaterialService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
--- Détection des capacités de l'executor (Xeno, Synapse, Delta, etc.)
 local EXEC = {
     has_hookmetamethod = (hookmetamethod ~= nil),
     has_hookfunction = (hookfunction ~= nil),
@@ -29,6 +27,7 @@ local EXEC = {
     has_getfenv = (getfenv ~= nil),
     has_getrenv = (getrenv ~= nil),
     has_setmetatable = (setmetatable ~= nil),
+    has_setfpscap = (setfpscap ~= nil),
     name = "Unknown"
 }
 
@@ -47,14 +46,11 @@ Library.ShowToggleFrameInKeybinds = true
 
 local Window = Library:CreateWindow({
     Title = "CulH | Rivals",
-    Footer = "v4.1.0 | Premium",
+    Footer = "v4.5.0 | Premium",
     NotifySide = "Right",
     ShowCustomCursor = true,
 })
 
--- =============================================
--- THÈME NOIR ET BLANC
--- =============================================
 local function applyBlackWhiteTheme()
     local theme = Library.Theme
     if theme then
@@ -86,9 +82,6 @@ task.spawn(function()
     applyBlackWhiteTheme()
 end)
 
--- =============================================
--- REMPLACE LE TITRE PAR DISCORD.GG/UGINFO
--- =============================================
 task.spawn(function()
     task.wait(0.8)
     local function findGui()
@@ -131,14 +124,13 @@ local Tabs = {
     Aim = Window:AddTab("Aim", "crosshair"),
     Visuals = Window:AddTab("Visuals", "eye"),
     Effects = Window:AddTab("Effects", "sparkles"),
+    Graphics = Window:AddTab("Graphics", "monitor"),
     UnlockAll = Window:AddTab("Unlock All", "box"),
     Misc = Window:AddTab("Misc", "settings"),
+    Divers = Window:AddTab("Divers", "zap"),
     Settings = Window:AddTab("Settings", "wrench"),
 }
 
--- =============================================
--- FONT PRESETS
--- =============================================
 local FontPresets = {
     {Name = "Default", Font = 0, Size = 13},
     {Name = "System", Font = 1, Size = 13},
@@ -159,9 +151,6 @@ local FontPresets = {
 
 local FontNames = {} for _,p in ipairs(FontPresets) do table.insert(FontNames, p.Name) end
 
--- =============================================
--- SOUND PRESETS
--- =============================================
 local HitSoundPresets = {
     {Name="Default",ID="7147454322"},{Name="MW19",ID="7172056822"},{Name="BOCW",ID="106024820372775"},
     {Name="Headshot",ID="208341701"},{Name="Ding",ID="17727836121"},{Name="Classic",ID="138672414"},
@@ -180,9 +169,6 @@ local KillSoundNames = {} for _,p in ipairs(KillSoundPresets) do table.insert(Ki
 local ImpactEffectNames = {"None","Explosion","Sparkle","Smoke","Fire","Ice","Confetti","Glow","Ring"}
 local ShootFXStyles = {"Bubbles","Fire","Glow","Stars"}
 
--- =============================================
--- AMBIENCE PRESETS
--- =============================================
 local AmbiencePresets = {
     {Name = "Default", Properties = {Ambient = Color3.new(0.5, 0.5, 0.5), Brightness = 1, ColorShift_Bottom = Color3.new(0, 0, 0), ColorShift_Top = Color3.new(0, 0, 0), EnvironmentDiffuseScale = 1, EnvironmentSpecularScale = 1, ExposureCompensation = 0, FogColor = Color3.new(0.75, 0.75, 0.75), FogEnd = 100000, FogStart = 0, GlobalShadows = true, OutdoorAmbient = Color3.new(0.5, 0.5, 0.5), ShadowSoftness = 0.2, ClockTime = 14, GeographicLatitude = 41.7}},
     {Name = "Stormy Night", Properties = {Ambient = Color3.fromRGB(30, 30, 40), Brightness = 0.3, ColorShift_Bottom = Color3.fromRGB(0, 0, 20), ColorShift_Top = Color3.fromRGB(30, 30, 50), EnvironmentDiffuseScale = 0.7, EnvironmentSpecularScale = 0.5, ExposureCompensation = -0.5, FogColor = Color3.fromRGB(20, 20, 30), FogEnd = 300, FogStart = 50, GlobalShadows = true, OutdoorAmbient = Color3.fromRGB(20, 20, 30), ShadowSoftness = 0.5, ClockTime = 0, GeographicLatitude = 41.7}},
@@ -195,9 +181,6 @@ local AmbiencePresets = {
 
 local AmbienceNames = {} for _,p in ipairs(AmbiencePresets) do table.insert(AmbienceNames, p.Name) end
 
--- =============================================
--- SKYBOX PRESETS
--- =============================================
 local SkyboxPresets = {
     {Name = "Purple Night", IDs = {SkyboxBk = "rbxassetid://5346760450", SkyboxDn = "rbxassetid://5346760689", SkyboxFt = "rbxassetid://5346760919", SkyboxLf = "rbxassetid://5346761102", SkyboxRt = "rbxassetid://5346761335", SkyboxUp = "rbxassetid://5346761509"}},
     {Name = "SpongeBob", IDs = {SkyboxBk = "rbxassetid://15962101128", SkyboxDn = "rbxassetid://15970246218", SkyboxFt = "rbxassetid://15962101128", SkyboxLf = "rbxassetid://15962101128", SkyboxRt = "rbxassetid://15962101128", SkyboxUp = "rbxassetid://15962901054"}},
@@ -212,9 +195,6 @@ local SkyboxPresets = {
 
 local SkyboxNames = {} for _,p in ipairs(SkyboxPresets) do table.insert(SkyboxNames, p.Name) end
 
--- =============================================
--- STATE VARIABLES
--- =============================================
 local Highlights = {}
 local ESPCache = {}
 local Connections = {}
@@ -237,26 +217,116 @@ local CurrentSkyboxIndex = 1
 local OriginalSkyboxes = {}
 
 -- =============================================
--- THIRD PERSON STATE (VISUAL OFFSET ONLY)
+-- ANTI-KATANA STATE
 -- =============================================
+local AntiKatanaState = {
+    enabled = false,
+}
+
+-- =============================================
+-- ANTI-KATANA : détecte si un joueur a un katana équipé
+-- =============================================
+local function hasKatanaEquipped(plr)
+    if not plr or not plr.Character then return false end
+    local char = plr.Character
+    
+    local tool = char:FindFirstChildOfClass("Tool")
+    if tool and tool.Name:lower():find("katana") then
+        return true
+    end
+    
+    local viewmodels = workspace:FindFirstChild("ViewModels")
+    if viewmodels then
+        local prefix = plr.Name .. " - Katana"
+        for _, vm in ipairs(viewmodels:GetChildren()) do
+            if vm.Name:sub(1, #prefix) == prefix then
+                return true
+            end
+        end
+        local fp = viewmodels:FindFirstChild("FirstPerson")
+        if fp then
+            for _, vm in ipairs(fp:GetChildren()) do
+                if vm.Name:sub(1, #prefix) == prefix then
+                    return true
+                end
+            end
+        end
+    end
+    
+    local fighterCtrl = getgenv()._antiKatanaFighterController
+    if not fighterCtrl then
+        pcall(function()
+            fighterCtrl = require(LocalPlayer.PlayerScripts.Controllers.FighterController)
+            getgenv()._antiKatanaFighterController = fighterCtrl
+        end)
+    end
+    if fighterCtrl then
+        local ok, fighter = pcall(function() return fighterCtrl:GetFighter(plr) end)
+        if ok and fighter then
+            local equipped = fighter.EquippedItem
+            if equipped and equipped.Name and equipped.Name:lower():find("katana") then
+                return true
+            end
+        end
+    end
+    
+    return false
+end
+
+local GraphicsState = {
+    removedDecals = {},
+    removedParticles = {},
+    removedTextures = {},
+    savedMaterial = {},
+    savedWater = {},
+    removedTerrainDetails = false,
+    origTerrain = nil,
+    lightingSaved = false,
+    savedLightingFull = {},
+    lastQuality = nil,
+}
+
+local FPSState = {
+    enabled = false,
+    targetCap = 240,
+    currentFps = 0,
+    frameCount = 0,
+    lastTime = tick(),
+    originalCap = 60,
+    drawFpsLabel = nil,
+    method = "None",
+}
+
+if setfpscap then
+    FPSState.method = "setfpscap"
+elseif getgenv and rawget(getgenv(), "setfpscap") then
+    FPSState.method = "getgenv().setfpscap"
+elseif getfenv and rawget(getfenv(0) or {}, "setfpscap") then
+    FPSState.method = "getfenv().setfpscap"
+end
+
+local FlyState = {
+    enabled = false,
+    connection = nil,
+    velocity = nil,
+    gyro = nil,
+    originalCollide = {},
+    savedHumanoidState = nil,
+    keyHeld = {},
+}
+
 local ThirdPerson = {
     enabled = false,
     connection = nil,
     origFOV = nil,
 }
 
--- =============================================
--- SELF HIGHLIGHT STATE (RAINBOW OUTLINE)
--- =============================================
 local SelfHighlight = {
     instance = nil,
     hue = 0,
     forceColor = nil,
 }
 
--- =============================================
--- TP UNDER ENEMY
--- =============================================
 local TPUnderEnemy = {
     enabled = false,
     connection = nil,
@@ -357,9 +427,6 @@ local function toggleTPUnderEnemy()
     if TPUnderEnemy.toggle then TPUnderEnemy.toggle:Set(TPUnderEnemy.enabled) end
 end
 
--- =============================================
--- UTILITY
--- =============================================
 local function alive(p) 
     if not p or not p.Character then return false end
     local h = p.Character:FindFirstChildOfClass("Humanoid")
@@ -460,9 +527,446 @@ local function playSound(id, vol)
     end)
 end
 
--- =============================================
--- SELF HIGHLIGHT FUNCTIONS
--- =============================================
+local function enableFly()
+    if FlyState.enabled then return end
+    local char = LocalPlayer.Character
+    if not char then
+        Library:Notify({Title = "Fly", Description = "No character found!", Time = 3})
+        return
+    end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum then
+        Library:Notify({Title = "Fly", Description = "Missing HRP or Humanoid!", Time = 3})
+        return
+    end
+
+    FlyState.savedHumanoidState = hum:GetState()
+    FlyState.keyHeld = {}
+
+    local bv = Instance.new("BodyVelocity")
+    bv.Name = "ENI_Fly_Velocity"
+    bv.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+    bv.Velocity = Vector3.new(0, 0, 0)
+    bv.P = 1250
+    bv.Parent = hrp
+    FlyState.velocity = bv
+
+    local bg = Instance.new("BodyGyro")
+    bg.Name = "ENI_Fly_Gyro"
+    bg.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+    bg.P = 3000
+    bg.D = 500
+    bg.CFrame = hrp.CFrame
+    bg.Parent = hrp
+    FlyState.gyro = bg
+
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then
+            FlyState.originalCollide[part] = part.CanCollide
+            part.CanCollide = false
+        end
+    end
+
+    pcall(function() hum:ChangeState(Enum.HumanoidStateType.Physics) end)
+    pcall(function() hum.PlatformStand = true end)
+
+    FlyState.connection = RunService.RenderStepped:Connect(function(dt)
+        if not FlyState.enabled then return end
+        local c = LocalPlayer.Character
+        if not c then return end
+        local root = c:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+
+        local speed = (Options.FlySpeed and Options.FlySpeed.Value) or 50
+        local vertSpeed = (Options.FlyVerticalSpeed and Options.FlyVerticalSpeed.Value) or 50
+        local mode = (Options.FlyMode and Options.FlyMode.Value) or "Camera"
+
+        local moveDir = Vector3.zero
+        local camCF = Camera.CFrame
+        local look = camCF.LookVector
+        local right = camCF.RightVector
+
+        if mode == "Camera" then
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + look end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - look end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + right end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - right end
+        else
+            local flatLook = Vector3.new(look.X, 0, look.Z)
+            local flatRight = Vector3.new(right.X, 0, right.Z)
+            if flatLook.Magnitude > 0.01 then flatLook = flatLook.Unit end
+            if flatRight.Magnitude > 0.01 then flatRight = flatRight.Unit end
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + flatLook end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - flatLook end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + flatRight end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - flatRight end
+        end
+
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+            moveDir = moveDir + Vector3.new(0, 1, 0)
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+            moveDir = moveDir - Vector3.new(0, 1, 0)
+        end
+
+        if moveDir.Magnitude > 0 then
+            moveDir = moveDir.Unit
+            local finalSpeed = speed
+            if math.abs(moveDir.Y) > 0.5 then
+                finalSpeed = vertSpeed
+            end
+            bv.Velocity = moveDir * finalSpeed
+        else
+            bv.Velocity = Vector3.zero
+        end
+
+        bg.CFrame = CFrame.new(root.Position, root.Position + look)
+    end)
+
+    FlyState.enabled = true
+    Library:Notify({Title = "Fly", Description = "Enabled - WASD to move, Space/Ctrl for up/down", Time = 4})
+end
+
+local function disableFly()
+    if not FlyState.enabled then return end
+    if FlyState.connection then
+        FlyState.connection:Disconnect()
+        FlyState.connection = nil
+    end
+    if FlyState.velocity then
+        pcall(function() FlyState.velocity:Destroy() end)
+        FlyState.velocity = nil
+    end
+    if FlyState.gyro then
+        pcall(function() FlyState.gyro:Destroy() end)
+        FlyState.gyro = nil
+    end
+    local char = LocalPlayer.Character
+    if char then
+        for part, state in pairs(FlyState.originalCollide) do
+            if part and part.Parent then
+                pcall(function() part.CanCollide = state end)
+            end
+        end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            pcall(function() hum.PlatformStand = false end)
+            pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+        end
+    end
+    FlyState.originalCollide = {}
+    FlyState.enabled = false
+    Library:Notify({Title = "Fly", Description = "Disabled", Time = 2})
+end
+
+local function toggleFly()
+    if FlyState.enabled then
+        disableFly()
+    else
+        enableFly()
+    end
+    if Toggles.FlyOn then Toggles.FlyOn:Set(FlyState.enabled) end
+end
+
+local function trySetFpsCap(cap)
+    if not cap or cap <= 0 then return false end
+    local success = false
+    if setfpscap then
+        pcall(function() setfpscap(cap) end)
+        success = true
+    end
+    if not success and getgenv then
+        local fn = rawget(getgenv(), "setfpscap")
+        if type(fn) == "function" then
+            pcall(function() fn(cap) end)
+            success = true
+        end
+    end
+    if not success and getfenv then
+        pcall(function()
+            local env = getfenv(0)
+            if type(env.setfpscap) == "function" then
+                env.setfpscap(cap)
+                success = true
+            end
+        end)
+    end
+    if not success then
+        pcall(function()
+            if settings and settings().Rendering then
+                local prop = settings().Rendering:FindFirstChild("FramerateCap")
+                if prop then
+                    prop.Value = cap
+                    success = true
+                end
+            end
+        end)
+    end
+    return success
+end
+
+local function createFpsLabel()
+    if not HasDrawing then return end
+    if FPSState.drawFpsLabel then return end
+    FPSState.drawFpsLabel = Drawing.new("Text")
+    FPSState.drawFpsLabel.Size = 18
+    FPSState.drawFpsLabel.Center = false
+    FPSState.drawFpsLabel.Outline = true
+    FPSState.drawFpsLabel.OutlineColor = Color3.new(0, 0, 0)
+    FPSState.drawFpsLabel.Color = Color3.fromRGB(255, 255, 255)
+    FPSState.drawFpsLabel.Position = Vector2.new(15, 15)
+    FPSState.drawFpsLabel.Visible = true
+end
+
+local function removeFpsLabel()
+    if FPSState.drawFpsLabel then
+        pcall(function() FPSState.drawFpsLabel:Remove() end)
+        FPSState.drawFpsLabel = nil
+    end
+end
+
+local function removeDecals()
+    if not Toggles.GPNoDecals then return end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("Decal") and not GraphicsState.removedDecals[obj] then
+            GraphicsState.removedDecals[obj] = true
+            obj.Transparency = 1
+        end
+    end
+end
+
+local function restoreDecals()
+    for obj, _ in pairs(GraphicsState.removedDecals) do
+        if obj and obj.Parent then
+            pcall(function() obj.Transparency = 0 end)
+        end
+    end
+    GraphicsState.removedDecals = {}
+end
+
+local function removeParticles()
+    if not Toggles.GPNoParticles then return end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if (obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") or obj:IsA("Trail") or obj:IsA("Beam")) and not GraphicsState.removedParticles[obj] then
+            GraphicsState.removedParticles[obj] = obj.Enabled
+            obj.Enabled = false
+        end
+    end
+end
+
+local function restoreParticles()
+    for obj, state in pairs(GraphicsState.removedParticles) do
+        if obj and obj.Parent then
+            pcall(function() obj.Enabled = state end)
+        end
+    end
+    GraphicsState.removedParticles = {}
+end
+
+local function removeTextures()
+    if not Toggles.GPNoTextures then return end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("Texture") and not GraphicsState.removedTextures[obj] then
+            GraphicsState.removedTextures[obj] = true
+            obj.Transparency = 1
+        end
+        if obj:IsA("SurfaceAppearance") and not GraphicsState.removedTextures[obj] then
+            GraphicsState.removedTextures[obj] = true
+            pcall(function()
+                obj.ColorMap = ""
+                obj.NormalMap = ""
+                obj.RoughnessMap = ""
+                obj.MetalnessMap = ""
+            end)
+        end
+    end
+end
+
+local function restoreTextures()
+    for obj, _ in pairs(GraphicsState.removedTextures) do
+        if obj and obj.Parent then
+            pcall(function() obj.Transparency = 0 end)
+        end
+    end
+    GraphicsState.removedTextures = {}
+end
+
+local function removeMeshDetails()
+    if not Toggles.GPNoMeshDetails then return end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if (obj:IsA("MeshPart") or obj:IsA("Part")) and not GraphicsState.savedMaterial[obj] then
+            GraphicsState.savedMaterial[obj] = obj.Material
+            pcall(function() obj.Material = Enum.Material.SmoothPlastic end)
+        end
+    end
+end
+
+local function restoreMeshDetails()
+    for obj, mat in pairs(GraphicsState.savedMaterial) do
+        if obj and obj.Parent then
+            pcall(function() obj.Material = mat end)
+        end
+    end
+    GraphicsState.savedMaterial = {}
+end
+
+local function removeTerrainDetails()
+    if not Toggles.GPNoTerrainDetails then return end
+    GraphicsState.removedTerrainDetails = true
+    local terrain = workspace:FindFirstChildOfClass("Terrain")
+    if terrain then
+        pcall(function() terrain.Decoration = false end)
+        pcall(function() terrain.WaterWaveSize = 0 end)
+        pcall(function() terrain.WaterWaveSpeed = 0 end)
+        pcall(function() terrain.WaterTransparency = 1 end)
+    end
+end
+
+local function restoreTerrainDetails()
+    GraphicsState.removedTerrainDetails = false
+    local terrain = workspace:FindFirstChildOfClass("Terrain")
+    if terrain then
+        pcall(function() terrain.Decoration = true end)
+        pcall(function() terrain.WaterWaveSize = 0.15 end)
+        pcall(function() terrain.WaterWaveSpeed = 0.5 end)
+        pcall(function() terrain.WaterTransparency = 0.5 end)
+    end
+end
+
+local function removeShadows()
+    if not Toggles.GPNoShadows then return end
+    Lighting.GlobalShadows = false
+end
+
+local function restoreShadows()
+    Lighting.GlobalShadows = true
+end
+
+local function removeFog()
+    if not Toggles.GPNoFog then return end
+    if not GraphicsState.lightingSaved then
+        GraphicsState.savedLightingFull.FogEnd = Lighting.FogEnd
+        GraphicsState.savedLightingFull.FogStart = Lighting.FogStart
+        GraphicsState.savedLightingFull.FogColor = Lighting.FogColor
+        GraphicsState.lightingSaved = true
+    end
+    Lighting.FogEnd = 100000
+    Lighting.FogStart = 0
+end
+
+local function restoreFog()
+    if GraphicsState.lightingSaved then
+        Lighting.FogEnd = GraphicsState.savedLightingFull.FogEnd or 100000
+        Lighting.FogStart = GraphicsState.savedLightingFull.FogStart or 0
+        if GraphicsState.savedLightingFull.FogColor then
+            Lighting.FogColor = GraphicsState.savedLightingFull.FogColor
+        end
+    end
+end
+
+local function removePostEffects()
+    if not Toggles.GPNoPostFX then return end
+    for _, obj in ipairs(Lighting:GetChildren()) do
+        if obj:IsA("PostEffect") then obj.Enabled = false end
+    end
+    for _, obj in ipairs(Camera:GetChildren()) do
+        if obj:IsA("PostEffect") then obj.Enabled = false end
+    end
+end
+
+local function restorePostEffects()
+    for _, obj in ipairs(Lighting:GetChildren()) do
+        if obj:IsA("PostEffect") then obj.Enabled = true end
+    end
+    for _, obj in ipairs(Camera:GetChildren()) do
+        if obj:IsA("PostEffect") then obj.Enabled = true end
+    end
+end
+
+local function applyPixelation()
+    if not Toggles.GPPixel then return end
+    if not GraphicsState.pixelEffect then
+        local effect = Instance.new("BlurEffect")
+        effect.Name = "GP_PixelFX"
+        effect.Size = 2
+        effect.Parent = Lighting
+        GraphicsState.pixelEffect = effect
+    end
+end
+
+local function removePixelation()
+    if GraphicsState.pixelEffect then
+        pcall(function() GraphicsState.pixelEffect:Destroy() end)
+        GraphicsState.pixelEffect = nil
+    end
+end
+
+local function applyPresetUltraLow()
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+        settings().Rendering.MeshPartDetailLevel = Enum.MeshPartDetailLevel.Level01
+    end)
+    removeDecals()
+    removeParticles()
+    removeTextures()
+    removeMeshDetails()
+    removeTerrainDetails()
+    removeShadows()
+    removeFog()
+    removePostEffects()
+    Lighting.Ambient = Color3.fromRGB(200, 200, 200)
+    Lighting.Brightness = 2
+    Lighting.OutdoorAmbient = Color3.fromRGB(200, 200, 200)
+    Library:Notify({Title = "Graphics", Description = "Ultra Low preset applied", Time = 3})
+end
+
+local function applyPresetLow()
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level02
+        settings().Rendering.MeshPartDetailLevel = Enum.MeshPartDetailLevel.Level02
+    end)
+    removeParticles()
+    removeShadows()
+    removeFog()
+    removePostEffects()
+    Library:Notify({Title = "Graphics", Description = "Low preset applied", Time = 3})
+end
+
+local function applyPresetMedium()
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level05
+        settings().Rendering.MeshPartDetailLevel = Enum.MeshPartDetailLevel.Level03
+    end)
+    removeShadows()
+    Library:Notify({Title = "Graphics", Description = "Medium preset applied", Time = 3})
+end
+
+local function applyPresetHigh()
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level10
+        settings().Rendering.MeshPartDetailLevel = Enum.MeshPartDetailLevel.Level04
+    end)
+    Library:Notify({Title = "Graphics", Description = "High preset applied", Time = 3})
+end
+
+local function restoreEverything()
+    restoreDecals()
+    restoreParticles()
+    restoreTextures()
+    restoreMeshDetails()
+    restoreTerrainDetails()
+    restoreShadows()
+    restoreFog()
+    restorePostEffects()
+    removePixelation()
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+        settings().Rendering.MeshPartDetailLevel = Enum.MeshPartDetailLevel.Automatic
+    end)
+    Library:Notify({Title = "Graphics", Description = "All settings restored", Time = 3})
+end
+
 local function createSelfHighlight()
     local char = LocalPlayer.Character
     if not char then return end
@@ -474,7 +978,7 @@ local function createSelfHighlight()
     hl.Name = "ENI_SelfHL"
     hl.Adornee = char
     hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    hl.FillTransparency = 1          -- pas de remplissage, juste les contours
+    hl.FillTransparency = 1
     hl.OutlineTransparency = 0
     hl.OutlineColor = Color3.fromRGB(255, 0, 0)
     hl.FillColor = Color3.fromRGB(255, 0, 0)
@@ -489,9 +993,6 @@ local function destroySelfHighlight()
     end
 end
 
--- =============================================
--- THIRD PERSON FUNCTIONS (VISUAL ONLY)
--- =============================================
 local function enableThirdPerson()
     if ThirdPerson.enabled then return end
     local char = LocalPlayer.Character
@@ -560,9 +1061,6 @@ local function toggleThirdPerson()
     if Toggles.TPOn then Toggles.TPOn:Set(ThirdPerson.enabled) end
 end
 
--- =============================================
--- UNLOCK ALL — Version persistante + Auto-load fiabilisé
--- =============================================
 local UnlockAll = {
     initialized = false,
     running = false,
@@ -585,7 +1083,6 @@ local function runUnlockAll(silent)
     Library:Notify({Title = "Unlock All", Description = (silent and "Auto-loading..." or "Starting...") .. " (" .. EXEC.name .. ")", Time = 3})
     
     task.spawn(function()
-        -- ===== AC Bypass =====
         if EXEC.has_hookfunction and EXEC.has_newcclosure and EXEC.has_getrenv then
             pcall(function()
                 local _stbl
@@ -620,7 +1117,6 @@ local function runUnlockAll(silent)
             end)
         end
         
-        -- ===== AC bypass ReplicatedFirst =====
         pcall(function()
             local _rf = game:GetService("ReplicatedFirst")
             local _tgt = _rf:FindFirstChild("LocalScript3")
@@ -650,7 +1146,6 @@ local function runUnlockAll(silent)
             end
         end)
         
-        -- ===== ATTENTE ACTIVE DES MODULES DU JEU =====
         local _rs = game:GetService("ReplicatedStorage")
         local _http = game:GetService("HttpService")
         local _lp = game:GetService("Players").LocalPlayer
@@ -716,7 +1211,6 @@ local function runUnlockAll(silent)
         Library:Notify({Title = "Unlock All", Description = "Game ready! Applying...", Time = 3})
         task.wait(1)
         
-        -- ===== TABLES ET FONCTIONS =====
         local _eq, _favs = UnlockAllData.eq, UnlockAllData.favs
         local _buildingWep = nil
         
@@ -991,9 +1485,6 @@ local function runUnlockAll(silent)
     end)
 end
 
--- =============================================
--- SKYBOX FUNCTIONS
--- =============================================
 local function saveOriginalSkybox()
     local sky = Lighting:FindFirstChildOfClass("Sky")
     if sky then
@@ -1088,9 +1579,6 @@ local function restoreSkybox()
     end)
 end
 
--- =============================================
--- AMBIENCE FUNCTIONS
--- =============================================
 local function saveOriginalLighting()
     OrigLighting = {
         Ambient = pcall(function() return Lighting.Ambient end) and Lighting.Ambient or Color3.new(0.5, 0.5, 0.5),
@@ -1160,9 +1648,6 @@ end
 saveOriginalLighting()
 saveOriginalSkybox()
 
--- =============================================
--- SPEED
--- =============================================
 local function updateSpeed()
     local char = LocalPlayer.Character
     if not char then return end
@@ -1175,9 +1660,6 @@ local function updateSpeed()
     end
 end
 
--- =============================================
--- DEVICE SPOOFER
--- =============================================
 local DeviceSpooferLastSent = nil
 local DeviceSpooferRemoteCache = nil
 
@@ -1211,9 +1693,6 @@ local function sendDeviceSpoofer()
     DeviceSpooferLastSent = mapped
 end
 
--- =============================================
--- BULLET TRACERS
--- =============================================
 local function spawnImpact(pos, color)
     if not Toggles.BTImpact.Value or Options.BTImpFX.Value == "None" then return end
     pcall(function()
@@ -1302,7 +1781,8 @@ local function spawnShootFX(pos)
                 p.Size = Vector3.new(0.15, 0.15, 0.15)
                 p.Material = Enum.Material.Neon
                 p.Color = Color3.fromHSV(math.random(), 0.8, 1)
-            end            p.CFrame = CFrame.new(pos + Vector3.new(math.random(-1, 1) * 0.5, math.random(-1, 1) * 0.5, math.random(-1, 1) * 0.5))
+            end
+            p.CFrame = CFrame.new(pos + Vector3.new(math.random(-1, 1) * 0.5, math.random(-1, 1) * 0.5, math.random(-1, 1) * 0.5))
             p.Parent = workspace
             TweenService:Create(p, TweenInfo.new(0.5), {
                 Transparency = 1,
@@ -1435,9 +1915,6 @@ local function updateBT()
     BT_Cache = keep
 end
 
--- =============================================
--- AIMBOT
--- =============================================
 local FOVDraw, FOVFillDraw = nil, nil
 if HasDrawing then
     FOVDraw = Drawing.new("Circle")
@@ -1457,9 +1934,11 @@ local function findTarget()
     local camP = Camera.CFrame.Position
     local useTeamCheck = Toggles.AimTeamCheck and Toggles.AimTeamCheck.Value
     local useDeadCheck = Toggles.AimDeadCheck and Toggles.AimDeadCheck.Value
+    local useAntiKatana = AntiKatanaState.enabled
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer or not isAlive(p, useDeadCheck) then continue end
         if useTeamCheck and not isEnemy(p, true) then continue end
+        if useAntiKatana and hasKatanaEquipped(p) then continue end
         local ch = p.Character
         if not ch then continue end
         local part = getPart(ch, Options.AimPart.Value)
@@ -1500,12 +1979,17 @@ local function aimAt(tgt)
         sm = sm * (1 - Options.AimStickyStr.Value)
     end
     sm = math.clamp(sm, 1, 20)
-    mousemoverel(math.floor(delta.X / sm), math.floor(delta.Y / sm))
+
+    local mag = delta.Magnitude
+    if mag < 0.15 then return end
+
+    local mx = math.floor(delta.X / sm)
+    local my = math.floor(delta.Y / sm)
+    if math.abs(mx) < 1 then mx = (delta.X > 0) and 1 or -1 end
+    if math.abs(my) < 1 then my = (delta.Y > 0) and 1 or -1 end
+    mousemoverel(mx, my)
 end
 
--- =============================================
--- SCOPE
--- =============================================
 local function startScope()
     if ScopeActive or not Toggles.ScopeOn.Value then return end
     ScopeOrigFOV = Camera.FieldOfView
@@ -1533,9 +2017,6 @@ local function stopScope()
     end
 end
 
--- =============================================
--- CROSSHAIR
--- =============================================
 local CrossLines = {}
 local CrossSpin = 0
 local XRBHue = 0
@@ -1638,9 +2119,6 @@ local function updateCrosshair()
     end
 end
 
--- =============================================
--- ESP
--- =============================================
 local function makeCache(p)
     if not HasDrawing or ESPCache[p] then return end
     local c = {}
@@ -1923,9 +2401,6 @@ local function updateDrawESP(player)
     end
 end
 
--- =============================================
--- HIGHLIGHTS
--- =============================================
 local function addHL(p)
     if p == LocalPlayer then return end
     local function onChar(ch)
@@ -1973,15 +2448,15 @@ local AimLeft = Tabs.Aim:AddLeftGroupbox("Aimbot", "crosshair")
 AimLeft:AddToggle("AimOn", { Text = "Enable Aimbot", Default = false })
 AimLeft:AddToggle("AimMouseHard", { Text = "Hard Lock (Mouse)", Default = false, Tooltip = "Hard mousemoverel - no smoothing" })
 AimLeft:AddToggle("AimTeamCheck", { Text = "Team Check", Default = false, Tooltip = "Only target enemies (based on HUD highlights/billboards)" })
-AimLeft:AddSlider("AimSm", { Text = "Smooth Mouse Speed", Default = 3, Min = 1, Max = 20, Rounding = 1, Tooltip = "Lower = snappier, Higher = smoother" })
+AimLeft:AddSlider("AimSm", { Text = "Smooth Mouse Speed", Default = 1, Min = 1, Max = 20, Rounding = 1, Tooltip = "Lower = snappier, Higher = smoother" })
 AimLeft:AddSlider("AimFOV", { Text = "FOV Radius", Default = 200, Min = 50, Max = 800, Rounding = 0 })
 AimLeft:AddSlider("AimDist", { Text = "Max Distance", Default = 1500, Min = 100, Max = 5000, Rounding = 0, Suffix = " studs" })
 AimLeft:AddDropdown("AimPart", { Values = {"Head","UpperTorso","HumanoidRootPart","LowerTorso"}, Default = "Head", Text = "Target Part" })
 AimLeft:AddLabel("Aim Key"):AddKeyPicker("AimKey", { Default = "MB2", Mode = "Hold", Text = "Aim Key" })
 
 local StickyBox = Tabs.Aim:AddLeftGroupbox("Sticky Aim")
-StickyBox:AddToggle("AimSticky", { Text = "Enable Sticky Aim", Default = false, Tooltip = "Stays locked to same target" })
-StickyBox:AddSlider("AimStickyStr", { Text = "Sticky Strength", Default = 0.5, Min = 0.1, Max = 1, Rounding = 2 })
+StickyBox:AddToggle("AimSticky", { Text = "Enable Sticky Aim", Default = true, Tooltip = "Stays locked to same target" })
+StickyBox:AddSlider("AimStickyStr", { Text = "Sticky Strength", Default = 0.85, Min = 0.1, Max = 1, Rounding = 2 })
 
 local VisBox = Tabs.Aim:AddLeftGroupbox("Visibility")
 VisBox:AddToggle("AimVisCheck", { Text = "Visible Check", Default = false, Tooltip = "Only target visible players" })
@@ -2141,6 +2616,179 @@ SndBox:AddToggle("ShootFXOn", { Text = "Shoot Effects", Default = false })
 SndBox:AddDropdown("ShootFXStyle", { Values = ShootFXStyles, Default = "Bubbles", Text = "Shoot Style" })
 
 -- =============================================
+-- TAB 3.5: GRAPHICS + FPS
+-- =============================================
+local GraphicsPresets = Tabs.Graphics:AddLeftGroupbox("Presets", "zap")
+
+GraphicsPresets:AddButton({ Text = "⚡ ULTRA LOW (Max FPS)", Func = function() applyPresetUltraLow() end, DoubleClick = false })
+GraphicsPresets:AddButton({ Text = "🔻 Low", Func = function() applyPresetLow() end, DoubleClick = false })
+GraphicsPresets:AddButton({ Text = "⚖ Medium", Func = function() applyPresetMedium() end, DoubleClick = false })
+GraphicsPresets:AddButton({ Text = "🔺 High", Func = function() applyPresetHigh() end, DoubleClick = false })
+GraphicsPresets:AddButton({ Text = "♻ Restore All", Func = function() restoreEverything() end, DoubleClick = false })
+
+local FPSGroup = Tabs.Graphics:AddLeftGroupbox("FPS Unlock / Multiplier", "zap")
+
+FPSGroup:AddLabel("Méthode détectée : " .. FPSState.method, true)
+FPSGroup:AddLabel("Executor : " .. EXEC.name, true)
+FPSGroup:AddDivider()
+
+FPSGroup:AddToggle("FPSUnlockOn", {
+    Text = "Enable FPS Unlock",
+    Default = false,
+    Tooltip = "Débride la limite de FPS (nécessite setfpscap dans ton executor)"
+}):OnChanged(function(v)
+    if v then
+        local cap = Options.FPSCapSlider and Options.FPSCapSlider.Value or 240
+        local ok = trySetFpsCap(cap)
+        if ok then
+            FPSState.enabled = true
+            FPSState.targetCap = cap
+            Library:Notify({Title = "FPS Unlock", Description = "Cap " .. cap .. " appliqué", Time = 3})
+        else
+            Library:Notify({Title = "FPS Unlock", Description = "Aucune méthode dispo pour ton executor!", Time = 5})
+        end
+    else
+        if setfpscap then pcall(function() setfpscap(FPSState.originalCap) end) end
+        FPSState.enabled = false
+        Library:Notify({Title = "FPS Unlock", Description = "Disabled", Time = 2})
+    end
+end)
+
+FPSGroup:AddSlider("FPSCapSlider", {
+    Text = "FPS Cap",
+    Default = 240,
+    Min = 30,
+    Max = 999,
+    Rounding = 0,
+    Suffix = " fps"
+}):OnChanged(function(v)
+    if Toggles.FPSUnlockOn and Toggles.FPSUnlockOn.Value then
+        trySetFpsCap(v)
+        FPSState.targetCap = v
+    end
+end)
+
+FPSGroup:AddDropdown("FPSPreset", {
+    Values = {"60", "75", "120", "144", "165", "240", "360", "999"},
+    Default = "240",
+    Text = "FPS Preset"
+}):OnChanged(function(v)
+    local n = tonumber(v) or 240
+    if Options.FPSCapSlider then Options.FPSCapSlider:Set(n) end
+    if Toggles.FPSUnlockOn and Toggles.FPSUnlockOn.Value then
+        trySetFpsCap(n)
+        FPSState.targetCap = n
+    end
+end)
+
+FPSGroup:AddButton({
+    Text = "Test setfpscap",
+    Func = function()
+        if setfpscap then
+            pcall(function() setfpscap(999) end)
+            Library:Notify({Title = "FPS Test", Description = "setfpscap(999) envoyé - regarde le compteur", Time = 5})
+        else
+            Library:Notify({Title = "FPS Test", Description = "setfpscap N'EXISTE PAS dans ton executor", Time = 5})
+        end
+    end
+})
+
+FPSGroup:AddToggle("FPSShowCounter", {
+    Text = "Show FPS Counter",
+    Default = false
+}):OnChanged(function(v)
+    if v then createFpsLabel() else removeFpsLabel() end
+end)
+
+FPSGroup:AddSlider("FPSCounterSize", {
+    Text = "Counter Size",
+    Default = 18,
+    Min = 12,
+    Max = 40,
+    Rounding = 0
+}):OnChanged(function(v)
+    if FPSState.drawFpsLabel then
+        FPSState.drawFpsLabel.Size = v
+    end
+end)
+
+local GraphicsOpt = Tabs.Graphics:AddLeftGroupbox("Performance Options", "settings")
+
+GraphicsOpt:AddToggle("GPNoDecals", { Text = "Remove Decals", Default = false, Tooltip = "Cache les logos/stickers/graffitis" })
+GraphicsOpt:AddToggle("GPNoParticles", { Text = "Remove Particles & FX", Default = false, Tooltip = "Feux, fumée, particules, trails, beams" })
+GraphicsOpt:AddToggle("GPNoTextures", { Text = "Remove Textures", Default = false, Tooltip = "Cache les Texture / SurfaceAppearance" })
+GraphicsOpt:AddToggle("GPNoMeshDetails", { Text = "Simplify Materials", Default = false, Tooltip = "Remplace tous les matériaux par SmoothPlastic" })
+GraphicsOpt:AddToggle("GPNoTerrainDetails", { Text = "Simplify Terrain", Default = false, Tooltip = "Retire herbe / eau waves du terrain" })
+GraphicsOpt:AddToggle("GPNoShadows", { Text = "Disable Shadows", Default = false, Tooltip = "Désactive GlobalShadows" })
+GraphicsOpt:AddToggle("GPNoFog", { Text = "Disable Fog", Default = false, Tooltip = "Retire le brouillard" })
+GraphicsOpt:AddToggle("GPNoPostFX", { Text = "Disable PostFX", Default = false, Tooltip = "Désactive Blur, SunRays, ColorCorrection, etc." })
+GraphicsOpt:AddToggle("GPPixel", { Text = "Pixel/Blur Render", Default = false, Tooltip = "Effet blur léger pour masquer les détails" })
+
+local GraphicsPerf = Tabs.Graphics:AddRightGroupbox("Rendering", "monitor")
+
+GraphicsPerf:AddDropdown("GPQualityLevel", {
+    Values = {"Auto", "Level 1 (Low)", "Level 2", "Level 3", "Level 4", "Level 5", "Level 6", "Level 7", "Level 8", "Level 9", "Level 10 (High)"},
+    Default = "Auto",
+    Text = "Quality Level"
+}):OnChanged(function(v)
+    pcall(function()
+        if v == "Auto" then
+            settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+        else
+            local n = tonumber(v:match("%d+")) or 1
+            local enumLevel = Enum.QualityLevel["Level" .. (n < 10 and ("0" .. n) or tostring(n))]
+            if enumLevel then settings().Rendering.QualityLevel = enumLevel end
+        end
+    end)
+end)
+
+GraphicsPerf:AddDropdown("GPMeshDetail", {
+    Values = {"Auto", "Low", "Medium", "High"},
+    Default = "Auto",
+    Text = "Mesh Detail"
+}):OnChanged(function(v)
+    pcall(function()
+        if v == "Auto" then
+            settings().Rendering.MeshPartDetailLevel = Enum.MeshPartDetailLevel.Automatic
+        elseif v == "Low" then
+            settings().Rendering.MeshPartDetailLevel = Enum.MeshPartDetailLevel.Level01
+        elseif v == "Medium" then
+            settings().Rendering.MeshPartDetailLevel = Enum.MeshPartDetailLevel.Level02
+        elseif v == "High" then
+            settings().Rendering.MeshPartDetailLevel = Enum.MeshPartDetailLevel.Level04
+        end
+    end)
+end)
+
+GraphicsPerf:AddButton({
+    Text = "Apply Now",
+    Func = function()
+        pcall(function()
+            local q = Options.GPQualityLevel.Value
+            if q == "Auto" then
+                settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+            else
+                local n = tonumber(q:match("%d+")) or 1
+                local enumLevel = Enum.QualityLevel["Level" .. (n < 10 and ("0" .. n) or tostring(n))]
+                if enumLevel then settings().Rendering.QualityLevel = enumLevel end
+            end
+        end)
+        Library:Notify({Title = "Graphics", Description = "Settings applied", Time = 2})
+    end
+})
+
+local GraphicsInfo = Tabs.Graphics:AddRightGroupbox("Info", "info")
+GraphicsInfo:AddLabel("Ultra Low = maximum FPS mais très moche.", true)
+GraphicsInfo:AddLabel("Low = bon compromis FPS / visuel.", true)
+GraphicsInfo:AddLabel("Medium = visuel normal, perte légère.", true)
+GraphicsInfo:AddLabel("High = tout activé.", true)
+GraphicsInfo:AddDivider()
+GraphicsInfo:AddLabel("FPS Unlock : si rien ne change", true)
+GraphicsInfo:AddLabel("après le toggle, fais print(setfpscap)", true)
+GraphicsInfo:AddLabel("dans la console (F9). Si c'est nil,", true)
+GraphicsInfo:AddLabel("ton executor ne le supporte pas.", true)
+
+-- =============================================
 -- TAB 4: UNLOCK ALL
 -- =============================================
 local UnlockBox = Tabs.UnlockAll:AddLeftGroupbox("Unlock All")
@@ -2165,11 +2813,50 @@ MoveBox:AddSlider("WalkSpd", { Text = "Walk Speed", Default = 16, Min = 0, Max =
 MoveBox:AddToggle("WalkSpdOn", { Text = "Override Walk Speed", Default = false, Callback = updateSpeed })
 MoveBox:AddToggle("InfJump", { Text = "Infinite Jump", Default = false })
 MoveBox:AddToggle("Noclip", { Text = "Noclip", Default = false })
+
+MoveBox:AddToggle("FlyOn", {
+    Text = "Fly",
+    Default = false,
+    Callback = function(v)
+        if v and not FlyState.enabled then
+            enableFly()
+        elseif not v and FlyState.enabled then
+            disableFly()
+        end
+    end
+})
+
+MoveBox:AddSlider("FlySpeed", {
+    Text = "Fly Speed",
+    Default = 50,
+    Min = 5,
+    Max = 500,
+    Rounding = 0,
+    Suffix = " studs/s"
+})
+
+MoveBox:AddSlider("FlyVerticalSpeed", {
+    Text = "Fly Vertical Speed",
+    Default = 50,
+    Min = 5,
+    Max = 500,
+    Rounding = 0,
+    Suffix = " studs/s"
+})
+
+MoveBox:AddDropdown("FlyMode", {
+    Values = {"Camera", "Horizontal"},
+    Default = "Camera",
+    Text = "Fly Mode",
+    Tooltip = "Camera = direction caméra complète | Horizontal = plan X/Z uniquement"
+})
+
+MoveBox:AddLabel("Fly Key"):AddKeyPicker("FlyKey", { Default = "J", Mode = "Toggle", Text = "Fly Toggle" })
+
+Options.FlyKey:OnClick(function() toggleFly() end)
+
 MoveBox:AddButton({ Text = "Apply Speed", Func = updateSpeed })
 
--- =============================================
--- THIRD PERSON (VISUAL ONLY) — entre Movement et TP Under
--- =============================================
 local ThirdPersonBox = Tabs.Misc:AddLeftGroupbox("Third Person (Visual)", "camera")
 
 ThirdPersonBox:AddToggle("TPOn", {
@@ -2248,9 +2935,6 @@ ThirdPersonBox:AddSlider("SelfHLSpeed", {
     Rounding = 0
 })
 
--- =============================================
--- TP UNDER ENEMY
--- =============================================
 local TPUnderBox = Tabs.Misc:AddLeftGroupbox("TP Under Enemy", "map-pin")
 TPUnderBox:AddLabel("Press X to toggle ON/OFF", true)
 TPUnderBox:AddLabel("ON: TP -7.5 under enemy -> Lock Y -> Follow X/Z", true)
@@ -2343,7 +3027,149 @@ SrvBox:AddButton({ Text = "Copy Server Link", Func = function()
 end })
 
 -- =============================================
--- TAB 6: SETTINGS
+-- TAB 6: DIVERS (ANTI KATANA + EXTRAS)
+-- =============================================
+local DiversBox = Tabs.Divers:AddLeftGroupbox("Anti Katana", "shield")
+
+DiversBox:AddLabel("L'aimbot ne visera plus les joueurs ayant un katana équipé", true)
+DiversBox:AddDivider()
+
+DiversBox:AddToggle("AntiKatanaOn", {
+    Text = "Enable Anti Katana",
+    Default = false,
+    Callback = function(v)
+        AntiKatanaState.enabled = v
+        if v then
+            Library:Notify({Title = "Anti Katana", Description = "Activé - ignore les joueurs avec katana", Time = 3})
+        else
+            Library:Notify({Title = "Anti Katana", Description = "Désactivé", Time = 2})
+        end
+    end
+})
+
+DiversBox:AddLabel("Anti Katana Key"):AddKeyPicker("AntiKatanaKey", {
+    Default = "None",
+    Mode = "Toggle",
+    Text = "Anti Katana Toggle",
+    Callback = function(v)
+        AntiKatanaState.enabled = v
+    end
+})
+
+DiversBox:AddDivider()
+
+DiversBox:AddToggle("AntiKatanaVisualize", {
+    Text = "Debug: print dans la console",
+    Default = false,
+    Callback = function(v)
+        AntiKatanaState.visualize = v
+        if v then
+            Library:Notify({Title = "Anti Katana", Description = "Debug activé - regarde F9", Time = 3})
+        end
+    end
+})
+
+-- =============================================
+-- DIVERS - Extras
+-- =============================================
+local DiversExtras = Tabs.Divers:AddRightGroupbox("Extras", "zap")
+
+DiversExtras:AddLabel("Options diverses et variées", true)
+DiversExtras:AddDivider()
+
+-- Debug: print viewmodels dans le workspace
+DiversExtras:AddButton({
+    Text = "Debug: Print ViewModels",
+    Func = function()
+        local vm = workspace:FindFirstChild("ViewModels")
+        if vm then
+            print("=== ViewModels ===")
+            for _, child in ipairs(vm:GetChildren()) do
+                print(" - " .. child.Name)
+            end
+            local fp = vm:FindFirstChild("FirstPerson")
+            if fp then
+                print("=== FirstPerson ===")
+                for _, child in ipairs(fp:GetChildren()) do
+                    print(" - " .. child.Name)
+                end
+            end
+        else
+            print("Pas de ViewModels trouvé dans workspace")
+        end
+    end
+})
+
+-- Input pour cible debug
+DiversExtras:AddInput("DebugTargetName", {
+    Text = "Debug player name",
+    Default = "",
+    Placeholder = "username...",
+    Finished = true,
+    Callback = function(v) end
+})
+
+-- Debug: check si un joueur donné a un katana
+DiversExtras:AddButton({
+    Text = "Debug: Check player katana",
+    Func = function()
+        local name = Options.DebugTargetName and Options.DebugTargetName.Value or ""
+        if name == "" then
+            print("[AntiKatana Debug] Entre un username d'abord")
+            return
+        end
+        local plr = Players:FindFirstChild(name)
+        if not plr then
+            print("[AntiKatana Debug] Joueur '" .. name .. "' introuvable")
+            return
+        end
+        print("[AntiKatana Debug] Joueur: " .. plr.Name)
+        local tool = plr.Character and plr.Character:FindFirstChildOfClass("Tool")
+        print(" - Tool équipé: " .. tostring(tool and tool.Name or "aucun"))
+        print(" - hasKatanaEquipped: " .. tostring(hasKatanaEquipped(plr)))
+    end
+})
+
+DiversExtras:AddDivider()
+
+-- Toggle pour freeze tous les autres joueurs
+DiversExtras:AddToggle("FreezeAllOthers", {
+    Text = "Freeze Others (test)",
+    Default = false,
+    Callback = function(v)
+        if v then
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer and p.Character then
+                    local root = p.Character:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        root.Anchored = true
+                    end
+                end
+            end
+        else
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer and p.Character then
+                    local root = p.Character:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        root.Anchored = false
+                    end
+                end
+            end
+        end
+    end
+})
+
+DiversExtras:AddDivider()
+
+-- Info box
+DiversExtras:AddLabel("Détection du katana via :", true)
+DiversExtras:AddLabel("- Tool dans character", true)
+DiversExtras:AddLabel("- ViewModel (workspace.ViewModels)", true)
+DiversExtras:AddLabel("- FighterController EquippedItem", true)
+DiversExtras:AddLabel("S'applique à : Aimbot + Sticky Aim", true)
+
+-- =============================================
+-- TAB 7: SETTINGS
 -- =============================================
 local MenuGrp = Tabs.Settings:AddLeftGroupbox("Menu", "wrench")
 MenuGrp:AddToggle("KBMenu", { Default = false, Text = "Open Keybind Menu", Callback = function(v) Library.KeybindFrame.Visible = v end })
@@ -2356,10 +3182,36 @@ MenuGrp:AddButton({ Text = "Unload Script", DoubleClick = true, Func = function(
 Library.ToggleKeybind = Options.MenuKB
 
 -- =============================================
+-- FPS COUNTER RENDER LOOP
+-- =============================================
+RunService.RenderStepped:Connect(function()
+    FPSState.frameCount = FPSState.frameCount + 1
+    local now = tick()
+    if now - FPSState.lastTime >= 1 then
+        FPSState.currentFps = FPSState.frameCount / (now - FPSState.lastTime)
+        FPSState.frameCount = 0
+        FPSState.lastTime = now
+        if FPSState.drawFpsLabel and Toggles.FPSShowCounter and Toggles.FPSShowCounter.Value then
+            local methodTag = (FPSState.method ~= "None") and "" or " [no setfpscap]"
+            FPSState.drawFpsLabel.Text = string.format("FPS: %d%s", math.floor(FPSState.currentFps + 0.5), methodTag)
+        end
+    end
+end)
+
+-- =============================================
 -- HEARTBEAT LOOP
 -- =============================================
 RunService.Heartbeat:Connect(function()
-    -- ===== Self Highlight (rainbow outline sur ton perso) =====
+    if Toggles.GPNoDecals and Toggles.GPNoDecals.Value then removeDecals() end
+    if Toggles.GPNoParticles and Toggles.GPNoParticles.Value then removeParticles() end
+    if Toggles.GPNoTextures and Toggles.GPNoTextures.Value then removeTextures() end
+    if Toggles.GPNoMeshDetails and Toggles.GPNoMeshDetails.Value then removeMeshDetails() end
+    if Toggles.GPNoTerrainDetails and Toggles.GPNoTerrainDetails.Value then removeTerrainDetails() end
+    if Toggles.GPNoShadows and Toggles.GPNoShadows.Value then removeShadows() end
+    if Toggles.GPNoFog and Toggles.GPNoFog.Value then removeFog() end
+    if Toggles.GPNoPostFX and Toggles.GPNoPostFX.Value then removePostEffects() end
+    if Toggles.GPPixel and Toggles.GPPixel.Value then applyPixelation() else removePixelation() end
+
     if Toggles.SelfHLOn and Toggles.SelfHLOn.Value then
         local char = LocalPlayer.Character
         if not SelfHighlight.instance or SelfHighlight.instance.Adornee ~= char then
@@ -2394,12 +3246,38 @@ RunService.Heartbeat:Connect(function()
     end
     
     if Toggles.AimOn.Value and Options.AimKey:GetState() then
-        local target = StickyLocked and StickyTarget or findTarget()
+        local target = nil
+
+        if Toggles.AimSticky.Value and StickyLocked and StickyTarget then
+            if StickyTarget.Character and isAlive(StickyTarget, true) then
+                local root = StickyTarget.Character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    local dist = dist3(Camera.CFrame.Position, root.Position)
+                    local antiKatanaOk = true
+                    if AntiKatanaState.enabled and hasKatanaEquipped(StickyTarget) then
+                        antiKatanaOk = false
+                    end
+                    if dist <= (Options.AimDist.Value * 2) and antiKatanaOk then
+                        target = StickyTarget
+                    end
+                end
+            end
+            if not target then
+                StickyLocked = false
+                StickyTarget = nil
+            end
+        end
+
+        if not target then
+            target = findTarget()
+            if target then
+                StickyLocked = true
+                StickyTarget = target
+            end
+        end
+
         if target then
             aimAt(target)
-        else
-            StickyLocked = false
-            StickyTarget = nil
         end
     else
         StickyLocked = false
@@ -2448,7 +3326,7 @@ RunService.Heartbeat:Connect(function()
     
     if Toggles.DeviceSpooferOn and Toggles.DeviceSpooferOn.Value then sendDeviceSpoofer() end
     
-    if Toggles.Noclip.Value and not TPUnderEnemy.enabled then
+    if Toggles.Noclip.Value and not TPUnderEnemy.enabled and not FlyState.enabled then
         pcall(function()
             local ch = LocalPlayer.Character
             if ch then
@@ -2473,13 +3351,13 @@ RunService.Heartbeat:Connect(function()
     
     if Toggles.NoFog.Value then
         Lighting.FogEnd = 1e9
-    elseif not ambienceActive then
+    elseif not ambienceActive and not (Toggles.GPNoFog and Toggles.GPNoFog.Value) then
         Lighting.FogEnd = OrigLighting.FogEnd
     end
     
     if Toggles.NoShadows.Value then
         Lighting.GlobalShadows = false
-    elseif not ambienceActive then
+    elseif not ambienceActive and not (Toggles.GPNoShadows and Toggles.GPNoShadows.Value) then
         Lighting.GlobalShadows = OrigLighting.GlobalShadows
     end
     
@@ -2547,9 +3425,6 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- =============================================
--- EVENT HANDLERS
--- =============================================
 Toggles.AmbienceOn:OnChanged(function()
     if Toggles.AmbienceOn.Value then
         local index = Options.AmbiencePreset.Value
@@ -2639,17 +3514,22 @@ LocalPlayer.CharacterAdded:Connect(function()
         pcall(function() SelfHighlight.instance:Destroy() end)
         SelfHighlight.instance = nil
     end
+    if FlyState.enabled then
+        FlyState.enabled = false
+        if FlyState.connection then FlyState.connection:Disconnect(); FlyState.connection = nil end
+        if Toggles.FlyOn then Toggles.FlyOn:Set(false) end
+    end
 end)
 
--- =============================================
--- CLEANUP
--- =============================================
 Library:OnUnload(function()
     for _, c in pairs(Connections) do
         if c and typeof(c) == "RBXScriptConnection" then c:Disconnect() end
     end
     if TPUnderEnemy.connection then TPUnderEnemy.connection:Disconnect() end
     if ThirdPerson.connection then ThirdPerson.connection:Disconnect() end
+    if FlyState.connection then FlyState.connection:Disconnect() end
+    if FlyState.velocity then pcall(function() FlyState.velocity:Destroy() end) end
+    if FlyState.gyro then pcall(function() FlyState.gyro:Destroy() end) end
     if SkyboxForceConnection then SkyboxForceConnection:Disconnect() end
     if HasDrawing then
         if FOVDraw then pcall(function() FOVDraw:Remove() end) end
@@ -2663,6 +3543,21 @@ Library:OnUnload(function()
     for _, hl in pairs(Highlights) do pcall(function() if hl then hl:Destroy() end end) end
     restoreSkybox()
     restoreAmbience()
+    pcall(function()
+        restoreDecals()
+        restoreParticles()
+        restoreTextures()
+        restoreMeshDetails()
+        restoreTerrainDetails()
+        restoreShadows()
+        restoreFog()
+        restorePostEffects()
+        removePixelation()
+    end)
+    pcall(function()
+        if setfpscap then setfpscap(FPSState.originalCap) end
+    end)
+    removeFpsLabel()
     for o, e in pairs(StoredEffects) do
         if o and o.Parent then o.Enabled = e end
     end
@@ -2671,6 +3566,9 @@ Library:OnUnload(function()
     Camera.FieldOfView = 70
     if ThirdPerson.enabled then
         disableThirdPerson()
+    end
+    if FlyState.enabled then
+        disableFly()
     end
     destroySelfHighlight()
     if TPUnderEnemy.enabled then
@@ -2685,13 +3583,10 @@ Library:OnUnload(function()
     end
 end)
 
--- =============================================
--- ADDONS
--- =============================================
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({"MenuKB", "AimKey", "ScopeKey", "SkyboxNextKey", "TPUnderKey", "TPKey"})
+SaveManager:SetIgnoreIndexes({"MenuKB", "AimKey", "ScopeKey", "SkyboxNextKey", "TPUnderKey", "TPKey", "FlyKey", "AntiKatanaKey", "DebugTargetName"})
 ThemeManager:SetFolder("CulHook")
 SaveManager:SetFolder("CulHook/configs")
 SaveManager:BuildConfigSection(Tabs.Settings)
@@ -2704,12 +3599,10 @@ SaveManager:LoadAutoloadConfig()
 initCrosshair()
 
 Library:Notify({Title = "CulHook!", Description = "Premium loaded! Press RightShift to toggle menu", Time = 5})
+Library:Notify({Title = "FPS Method", Description = FPSState.method, Time = 5})
 
--- =============================================
--- AUTO-LOAD UNLOCK ALL AU DEMARRAGE
--- =============================================
 task.spawn(function()
     task.wait(1)
     if UnlockAll.initialized then return end
     runUnlockAll(true)
-end)    
+end)
