@@ -32,7 +32,6 @@ local EXEC = {
     name = "Unknown"
 }
 
--- Essaye de détecter le nom de l'executor
 pcall(function()
     if syn then EXEC.name = "Synapse"
     elseif KRNL_LOADED then EXEC.name = "Krnl"
@@ -48,7 +47,7 @@ Library.ShowToggleFrameInKeybinds = true
 
 local Window = Library:CreateWindow({
     Title = "CulH | Rivals",
-    Footer = "v4.0.0 | Premium",
+    Footer = "v4.0.3 | Premium",
     NotifySide = "Right",
     ShowCustomCursor = true,
 })
@@ -418,24 +417,32 @@ local function playSound(id, vol)
 end
 
 -- =============================================
--- UNLOCK ALL (adapté pour Xeno et autres executors)
+-- UNLOCK ALL — Version persistante + Auto-load fiabilisé
 -- =============================================
 local UnlockAll = {
     initialized = false,
     running = false,
 }
 
-local function runUnlockAll()
+-- Table persistante au niveau du script
+local UnlockAllData = {
+    eq = {},
+    favs = {},
+}
+
+local function runUnlockAll(silent)
     if UnlockAll.running then
-        Library:Notify({Title = "Unlock All", Description = "Already running, please wait...", Time = 3})
+        if not silent then
+            Library:Notify({Title = "Unlock All", Description = "Already running, please wait...", Time = 3})
+        end
         return
     end
     
     UnlockAll.running = true
-    Library:Notify({Title = "Unlock All", Description = "Starting... (" .. EXEC.name .. ")", Time = 3})
+    Library:Notify({Title = "Unlock All", Description = (silent and "Auto-loading..." or "Starting...") .. " (" .. EXEC.name .. ")", Time = 3})
     
     task.spawn(function()
-        -- AC Bypass : seulement si hookfunction + newcclosure dispo
+        -- ===== AC Bypass =====
         if EXEC.has_hookfunction and EXEC.has_newcclosure and EXEC.has_getrenv then
             pcall(function()
                 local _stbl
@@ -450,7 +457,6 @@ local function runUnlockAll()
                 end))
             end)
         else
-            -- Fallback pour Xeno : on désactive juste les scripts AC
             pcall(function()
                 local function _proc(o)
                     pcall(function()
@@ -471,12 +477,11 @@ local function runUnlockAll()
             end)
         end
         
-        -- Désactive les AC dans ReplicatedFirst
+        -- ===== AC bypass ReplicatedFirst =====
         pcall(function()
             local _rf = game:GetService("ReplicatedFirst")
             local _tgt = _rf:FindFirstChild("LocalScript3")
             if not _tgt then return end
-            
             if EXEC.has_getgc and EXEC.has_hookfunction then
                 local _gc = getgc(false)
                 for _i = 1, #_gc do
@@ -494,9 +499,7 @@ local function runUnlockAll()
                     for _j = 1, #_consts do
                         local _c = _consts[_j]
                         if type(_c) == "string" and (_c:find("TakeTheL") or _c:find("ban") or _c:find("kick")) then
-                            pcall(function()
-                                hookfunction(_fn, function() end)
-                            end)
+                            pcall(function() hookfunction(_fn, function() end) end)
                             break
                         end
                     end
@@ -504,30 +507,78 @@ local function runUnlockAll()
             end
         end)
         
-        task.wait(2)
-        
-        -- Chargement des modules du jeu
+        -- ===== ATTENTE ACTIVE DES MODULES DU JEU =====
         local _rs = game:GetService("ReplicatedStorage")
         local _http = game:GetService("HttpService")
         local _lp = game:GetService("Players").LocalPlayer
         local _pscripts = _lp.PlayerScripts
-        local _ctrl = _pscripts:FindFirstChild("Controllers")
-        local _mods = _rs:FindFirstChild("Modules")
         
-        if not _ctrl or not _mods then
-            Library:Notify({Title = "Unlock All", Description = "Game modules not found. Wait for the game to load.", Time = 5})
-            UnlockAll.running = false
-            return
+        Library:Notify({Title = "Unlock All", Description = "Waiting for game to load...", Time = 3})
+        
+        local _ctrl, _mods, _cosLib, _enumLib, _datCtrl
+        
+        -- Boucle infinie jusqu'à ce que TOUT soit prêt
+        local _waited = 0
+        while true do
+            _ctrl = _pscripts:FindFirstChild("Controllers")
+            _mods = _rs:FindFirstChild("Modules")
+            
+            if _ctrl and _mods then
+                local _cosMod = _mods:FindFirstChild("CosmeticLibrary")
+                local _enumMod = _mods:FindFirstChild("EnumLibrary")
+                local _datMod = _ctrl:FindFirstChild("PlayerDataController")
+                
+                if _cosMod and _enumMod and _datMod then
+                    local _okAll = true
+                    
+                    if not _enumLib then
+                        local _ok, _res = pcall(require, _enumMod)
+                        if _ok then _enumLib = _res else _okAll = false end
+                    end
+                    if _okAll and not _cosLib then
+                        local _ok, _res = pcall(require, _cosMod)
+                        if _ok then _cosLib = _res else _okAll = false end
+                    end
+                    if _okAll and not _datCtrl then
+                        local _ok, _res = pcall(require, _datMod)
+                        if _ok then _datCtrl = _res else _okAll = false end
+                    end
+                    
+                    if _okAll and _cosLib and _cosLib.Cosmetics then
+                        -- Attend que WaitForEnumBuilder finisse
+                        if _enumLib and _enumLib.WaitForEnumBuilder then
+                            pcall(function() _enumLib:WaitForEnumBuilder() end)
+                        end
+                        
+                        -- Vérifie que Cosmetics est vraiment peuplé
+                        local _hasData = false
+                        local _count = 0
+                        for _k, _v in pairs(_cosLib.Cosmetics) do
+                            _hasData = true
+                            _count = _count + 1
+                            if _count >= 10 then break end
+                        end
+                        
+                        if _hasData then
+                            break -- TOUT EST PRÊT
+                        end
+                    end
+                end
+            end
+            
+            _waited = _waited + 1
+            if _waited == 1 or _waited % 5 == 0 then
+                Library:Notify({Title = "Unlock All", Description = "Waiting... (" .. _waited .. "s)", Time = 2})
+            end
+            task.wait(1)
         end
         
-        local _enumLib = require(_mods:WaitForChild("EnumLibrary", 10))
-        if _enumLib then pcall(function() _enumLib:WaitForEnumBuilder() end) end
-        local _cosLib = require(_mods:WaitForChild("CosmeticLibrary", 10))
-        local _datCtrl = require(_ctrl:WaitForChild("PlayerDataController", 10))
+        Library:Notify({Title = "Unlock All", Description = "Game ready! Applying...", Time = 3})
+        task.wait(1)
         
-        local _eq, _favs = {}, {}
+        -- ===== TABLES ET FONCTIONS =====
+        local _eq, _favs = UnlockAllData.eq, UnlockAllData.favs
         local _buildingWep = nil
-        local _lastWep = nil
         
         local function _mkCosmetic(nm, ctype, opts)
             local _base = _cosLib.Cosmetics[nm]
@@ -570,6 +621,52 @@ local function runUnlockAll()
             end)
         end
         
+        local function _loadCfg()
+            if not readfile or not isfile then return 0, 0 end
+            if not isfile(_cfgFile) then return 0, 0 end
+            local _ok, _raw = pcall(readfile, _cfgFile)
+            if not _ok or not _raw or _raw == "" then return 0, 0 end
+            local _ok2, _data = pcall(_http.JSONDecode, _http, _raw)
+            if not _ok2 or type(_data) ~= "table" then return 0, 0 end
+            
+            local _count, _missed = 0, 0
+            if _data.equipped then
+                for wn, cos in pairs(_data.equipped) do
+                    _eq[wn] = _eq[wn] or {}
+                    for ct, cd in pairs(cos) do
+                        if cd and cd.Name then
+                            local _cloned = _mkCosmetic(cd.Name, ct)
+                            if _cloned then
+                                _eq[wn][ct] = _cloned
+                                _count = _count + 1
+                            else
+                                _missed = _missed + 1
+                            end
+                        end
+                    end
+                end
+            end
+            if _data.favorites then _favs = _data.favorites end
+            return _count, _missed
+        end
+        
+        -- ===== LOAD CONFIG (avec retry si items non trouvés) =====
+        local _loaded, _missed = _loadCfg()
+        local _tries = 0
+        while _missed and _missed > 0 and _tries < 10 do
+            task.wait(2)
+            _tries = _tries + 1
+            for k in pairs(_eq) do _eq[k] = nil end
+            _loaded, _missed = _loadCfg()
+        end
+        
+        if _loaded and _loaded > 0 then
+            Library:Notify({Title = "Unlock All", Description = "Config restaurée (" .. _loaded .. " cosmétiques)", Time = 4})
+        else
+            Library:Notify({Title = "Unlock All", Description = "Aucune config trouvée — déverrouille manuellement.", Time = 4})
+        end
+        
+        -- ===== HOOKS =====
         local _cosTypes = {"Skin","Wrap","Charm","Dance","Emote"}
         local function _isCosType(cosObj)
             if not cosObj then return false end
@@ -579,7 +676,6 @@ local function runUnlockAll()
             return false
         end
         
-        -- Override OwnsCosmetic
         pcall(function()
             _cosLib.OwnsCosmeticNormally = function(self, inv, nm, wep)
                 local c = _cosLib.Cosmetics[nm]
@@ -607,7 +703,6 @@ local function runUnlockAll()
             end
         end)
         
-        -- Override PlayerDataController.Get
         pcall(function()
             local _origGet = _datCtrl.Get
             _datCtrl.Get = function(self, key)
@@ -656,7 +751,6 @@ local function runUnlockAll()
             end
         end)
         
-        -- Hook du __namecall (si supporté) ou fallback
         pcall(function()
             local _remotes = _rs:FindFirstChild("Remotes")
             local _dataRem = _remotes and _remotes:FindFirstChild("Data")
@@ -687,7 +781,6 @@ local function runUnlockAll()
             end
         end)
         
-        -- ClientItem hook
         pcall(function()
             local _cliItem = require(_pscripts.Modules.ClientReplicatedClasses.ClientFighter.ClientItem)
             if _cliItem and _cliItem._CreateViewModel then
@@ -741,6 +834,24 @@ local function runUnlockAll()
         Library:Notify({Title = "Unlock All", Description = "All cosmetics unlocked!", Time = 5})
         UnlockAll.initialized = true
         UnlockAll.running = false
+        
+        -- Autosave 30s
+        task.spawn(function()
+            while UnlockAll.initialized do
+                task.wait(30)
+                _saveCfg()
+            end
+        end)
+        
+        -- Replicate au respawn
+        LocalPlayer.CharacterAdded:Connect(function()
+            task.wait(1.5)
+            if UnlockAll.initialized then
+                pcall(function()
+                    _datCtrl.CurrentData:Replicate("WeaponInventory")
+                end)
+            end
+        end)
     end)
 end
 
@@ -1875,19 +1986,20 @@ SndBox:AddToggle("ShootFXOn", { Text = "Shoot Effects", Default = false })
 SndBox:AddDropdown("ShootFXStyle", { Values = ShootFXStyles, Default = "Bubbles", Text = "Shoot Style" })
 
 -- =============================================
--- TAB 4: UNLOCK ALL (bouton unique)
+-- TAB 4: UNLOCK ALL
 -- =============================================
 local UnlockBox = Tabs.UnlockAll:AddLeftGroupbox("Unlock All")
 UnlockBox:AddLabel("Executor detected: " .. EXEC.name, true)
-UnlockBox:AddLabel("Click below to unlock all skins, wraps, charms, dances and emotes.", true)
+UnlockBox:AddLabel("Auto-load actif : le script lance l'unlock des que le jeu est pret.", true)
+UnlockBox:AddLabel("Ta config est auto-sauvegardee et rechargee au rejoin.", true)
 UnlockBox:AddDivider()
 
 UnlockBox:AddButton({
-    Text = "Unlock All",
+    Text = "Unlock All (Manual)",
     Func = function()
         runUnlockAll()
     end,
-    Tooltip = "Unlocks all cosmetics in the game"
+    Tooltip = "Force un re-run du unlock (normalement automatique)"
 })
 
 -- =============================================
@@ -1902,7 +2014,7 @@ MoveBox:AddButton({ Text = "Apply Speed", Func = updateSpeed })
 
 local TPUnderBox = Tabs.Misc:AddLeftGroupbox("TP Under Enemy", "map-pin")
 TPUnderBox:AddLabel("Press X to toggle ON/OFF", true)
-TPUnderBox:AddLabel("ON: TP -7.5 under enemy → Lock Y → Follow X/Z", true)
+TPUnderBox:AddLabel("ON: TP -7.5 under enemy -> Lock Y -> Follow X/Z", true)
 TPUnderBox:AddLabel("OFF: Return to start position", true)
 TPUnderBox:AddDivider()
 
@@ -2325,3 +2437,12 @@ SaveManager:LoadAutoloadConfig()
 initCrosshair()
 
 Library:Notify({Title = "CulHook!", Description = "Premium loaded! Press RightShift to toggle menu", Time = 5})
+
+-- =============================================
+-- AUTO-LOAD UNLOCK ALL AU DEMARRAGE
+-- =============================================
+task.spawn(function()
+    task.wait(1)
+    if UnlockAll.initialized then return end
+    runUnlockAll(true)
+end)
