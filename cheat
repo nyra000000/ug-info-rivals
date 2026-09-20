@@ -47,7 +47,7 @@ Library.ShowToggleFrameInKeybinds = true
 
 local Window = Library:CreateWindow({
     Title = "CulH | Rivals",
-    Footer = "v4.0.3 | Premium",
+    Footer = "v4.1.0 | Premium",
     NotifySide = "Right",
     ShowCustomCursor = true,
 })
@@ -237,6 +237,24 @@ local CurrentSkyboxIndex = 1
 local OriginalSkyboxes = {}
 
 -- =============================================
+-- THIRD PERSON STATE (VISUAL OFFSET ONLY)
+-- =============================================
+local ThirdPerson = {
+    enabled = false,
+    connection = nil,
+    origFOV = nil,
+}
+
+-- =============================================
+-- SELF HIGHLIGHT STATE (RAINBOW OUTLINE)
+-- =============================================
+local SelfHighlight = {
+    instance = nil,
+    hue = 0,
+    forceColor = nil,
+}
+
+-- =============================================
 -- TP UNDER ENEMY
 -- =============================================
 local TPUnderEnemy = {
@@ -348,6 +366,13 @@ local function alive(p)
     return h and h.Health > 0
 end
 
+local function isAlive(playerToCheck, useDeadCheck)
+    if not useDeadCheck then return true end
+    if not playerToCheck or not playerToCheck.Character or typeof(playerToCheck.Character) ~= "Instance" then return false end
+    local hum = playerToCheck.Character:FindFirstChildOfClass("Humanoid")
+    return hum and hum.Health > 0
+end
+
 local function w2s(pos) 
     local v, on = Camera:WorldToViewportPoint(pos)
     return Vector2.new(v.X, v.Y), on, v.Z
@@ -373,6 +398,9 @@ local function getBones(ch)
     return {}
 end
 
+local _tcache = {}
+local TC_TTL = 0.4
+
 local function isVisible(from, targetPart)
     if not targetPart then return false end
     local rp = RaycastParams.new()
@@ -382,6 +410,22 @@ local function isVisible(from, targetPart)
     local result = workspace:Raycast(from, dir, rp)
     if not result then return true end
     return result.Instance == targetPart or result.Instance:IsDescendantOf(targetPart.Parent)
+end
+
+local isEnemy = function(playerToCheck, useTeamCheck)
+    if not playerToCheck or not playerToCheck.Character or typeof(playerToCheck.Character) ~= "Instance" then return false end
+    if not useTeamCheck then return true end
+    local now = tick()
+    local cached = _tcache[playerToCheck]
+    if cached and (now - cached.t) < TC_TTL then return cached.v end
+    local isTeam = false
+    for _, obj in ipairs(playerToCheck.Character:GetDescendants()) do
+        if typeof(obj) == "Instance" and (obj:IsA("BillboardGui") or (obj:IsA("Highlight") and obj.Name ~= "OHL" and obj.Name ~= "ENI_SelfHL")) then
+            isTeam = true; break
+        end
+    end
+    _tcache[playerToCheck] = {v = not isTeam, t = now}
+    return not isTeam
 end
 
 local function newDraw(cls, props)
@@ -417,6 +461,106 @@ local function playSound(id, vol)
 end
 
 -- =============================================
+-- SELF HIGHLIGHT FUNCTIONS
+-- =============================================
+local function createSelfHighlight()
+    local char = LocalPlayer.Character
+    if not char then return end
+    if SelfHighlight.instance then
+        pcall(function() SelfHighlight.instance:Destroy() end)
+        SelfHighlight.instance = nil
+    end
+    local hl = Instance.new("Highlight")
+    hl.Name = "ENI_SelfHL"
+    hl.Adornee = char
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.FillTransparency = 1          -- pas de remplissage, juste les contours
+    hl.OutlineTransparency = 0
+    hl.OutlineColor = Color3.fromRGB(255, 0, 0)
+    hl.FillColor = Color3.fromRGB(255, 0, 0)
+    hl.Parent = char
+    SelfHighlight.instance = hl
+end
+
+local function destroySelfHighlight()
+    if SelfHighlight.instance then
+        pcall(function() SelfHighlight.instance:Destroy() end)
+        SelfHighlight.instance = nil
+    end
+end
+
+-- =============================================
+-- THIRD PERSON FUNCTIONS (VISUAL ONLY)
+-- =============================================
+local function enableThirdPerson()
+    if ThirdPerson.enabled then return end
+    local char = LocalPlayer.Character
+    if not char then
+        Library:Notify({Title = "Third Person", Description = "No character found!", Time = 3})
+        return
+    end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then
+        Library:Notify({Title = "Third Person", Description = "No Humanoid found!", Time = 3})
+        return
+    end
+
+    ThirdPerson.origFOV = Camera.FieldOfView
+
+    ThirdPerson.connection = RunService.RenderStepped:Connect(function()
+        if not ThirdPerson.enabled then return end
+        local c = LocalPlayer.Character
+        if not c then return end
+        local hrp = c:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+
+        local dist = (Options.TPDistance and Options.TPDistance.Value) or 8
+        local height = (Options.TPHeight and Options.TPHeight.Value) or 0
+        local shoulder = (Options.TPShoulder and Options.TPShoulder.Value) or 0
+
+        local camCF = Camera.CFrame
+        local flatDir = Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z)
+        if flatDir.Magnitude < 0.01 then flatDir = Vector3.new(0, 0, 1) end
+        flatDir = flatDir.Unit
+        local rightVec = Vector3.new(flatDir.Z, 0, -flatDir.X)
+
+        local basePos = hrp.Position + Vector3.new(0, height, 0)
+        local newPos = basePos - flatDir * dist + rightVec * shoulder
+
+        Camera.CFrame = CFrame.new(newPos) * (camCF - camCF.Position)
+
+        if Toggles.TPCustomFOV and Toggles.TPCustomFOV.Value and Options.TPFOV then
+            Camera.FieldOfView = Options.TPFOV.Value
+        end
+    end)
+
+    ThirdPerson.enabled = true
+    Library:Notify({Title = "Third Person", Description = "Enabled (visual)", Time = 2})
+end
+
+local function disableThirdPerson()
+    if not ThirdPerson.enabled then return end
+    if ThirdPerson.connection then
+        ThirdPerson.connection:Disconnect()
+        ThirdPerson.connection = nil
+    end
+    if ThirdPerson.origFOV then
+        Camera.FieldOfView = ThirdPerson.origFOV
+    end
+    ThirdPerson.enabled = false
+    Library:Notify({Title = "Third Person", Description = "Disabled", Time = 2})
+end
+
+local function toggleThirdPerson()
+    if ThirdPerson.enabled then
+        disableThirdPerson()
+    else
+        enableThirdPerson()
+    end
+    if Toggles.TPOn then Toggles.TPOn:Set(ThirdPerson.enabled) end
+end
+
+-- =============================================
 -- UNLOCK ALL — Version persistante + Auto-load fiabilisé
 -- =============================================
 local UnlockAll = {
@@ -424,7 +568,6 @@ local UnlockAll = {
     running = false,
 }
 
--- Table persistante au niveau du script
 local UnlockAllData = {
     eq = {},
     favs = {},
@@ -517,7 +660,6 @@ local function runUnlockAll(silent)
         
         local _ctrl, _mods, _cosLib, _enumLib, _datCtrl
         
-        -- Boucle infinie jusqu'à ce que TOUT soit prêt
         local _waited = 0
         while true do
             _ctrl = _pscripts:FindFirstChild("Controllers")
@@ -545,12 +687,10 @@ local function runUnlockAll(silent)
                     end
                     
                     if _okAll and _cosLib and _cosLib.Cosmetics then
-                        -- Attend que WaitForEnumBuilder finisse
                         if _enumLib and _enumLib.WaitForEnumBuilder then
                             pcall(function() _enumLib:WaitForEnumBuilder() end)
                         end
                         
-                        -- Vérifie que Cosmetics est vraiment peuplé
                         local _hasData = false
                         local _count = 0
                         for _k, _v in pairs(_cosLib.Cosmetics) do
@@ -560,7 +700,7 @@ local function runUnlockAll(silent)
                         end
                         
                         if _hasData then
-                            break -- TOUT EST PRÊT
+                            break
                         end
                     end
                 end
@@ -650,7 +790,6 @@ local function runUnlockAll(silent)
             return _count, _missed
         end
         
-        -- ===== LOAD CONFIG (avec retry si items non trouvés) =====
         local _loaded, _missed = _loadCfg()
         local _tries = 0
         while _missed and _missed > 0 and _tries < 10 do
@@ -666,7 +805,6 @@ local function runUnlockAll(silent)
             Library:Notify({Title = "Unlock All", Description = "Aucune config trouvée — déverrouille manuellement.", Time = 4})
         end
         
-        -- ===== HOOKS =====
         local _cosTypes = {"Skin","Wrap","Charm","Dance","Emote"}
         local function _isCosType(cosObj)
             if not cosObj then return false end
@@ -835,7 +973,6 @@ local function runUnlockAll(silent)
         UnlockAll.initialized = true
         UnlockAll.running = false
         
-        -- Autosave 30s
         task.spawn(function()
             while UnlockAll.initialized do
                 task.wait(30)
@@ -843,7 +980,6 @@ local function runUnlockAll(silent)
             end
         end)
         
-        -- Replicate au respawn
         LocalPlayer.CharacterAdded:Connect(function()
             task.wait(1.5)
             if UnlockAll.initialized then
@@ -1166,8 +1302,7 @@ local function spawnShootFX(pos)
                 p.Size = Vector3.new(0.15, 0.15, 0.15)
                 p.Material = Enum.Material.Neon
                 p.Color = Color3.fromHSV(math.random(), 0.8, 1)
-            end
-            p.CFrame = CFrame.new(pos + Vector3.new(math.random(-1, 1) * 0.5, math.random(-1, 1) * 0.5, math.random(-1, 1) * 0.5))
+            end            p.CFrame = CFrame.new(pos + Vector3.new(math.random(-1, 1) * 0.5, math.random(-1, 1) * 0.5, math.random(-1, 1) * 0.5))
             p.Parent = workspace
             TweenService:Create(p, TweenInfo.new(0.5), {
                 Transparency = 1,
@@ -1320,8 +1455,11 @@ local function findTarget()
     local best, bestD = nil, Options.AimFOV.Value
     local ctr = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     local camP = Camera.CFrame.Position
+    local useTeamCheck = Toggles.AimTeamCheck and Toggles.AimTeamCheck.Value
+    local useDeadCheck = Toggles.AimDeadCheck and Toggles.AimDeadCheck.Value
     for _, p in ipairs(Players:GetPlayers()) do
-        if p == LocalPlayer or not alive(p) then continue end
+        if p == LocalPlayer or not isAlive(p, useDeadCheck) then continue end
+        if useTeamCheck and not isEnemy(p, true) then continue end
         local ch = p.Character
         if not ch then continue end
         local part = getPart(ch, Options.AimPart.Value)
@@ -1559,8 +1697,15 @@ local function updateDrawESP(player)
         if c then hideAll(player) end
         return
     end
+    local useTeamCheck = Toggles.ESPTeamCheck and Toggles.ESPTeamCheck.Value
+    if useTeamCheck and not isEnemy(player, true) then
+        hideAll(player)
+        return
+    end
+    local useDeadCheck = Toggles.ESPDeadCheck and Toggles.ESPDeadCheck.Value
+    if not isAlive(player, useDeadCheck) then hideAll(player); return end
     local ch = player.Character
-    if not ch or not alive(player) then hideAll(player); return end
+    if not ch then hideAll(player); return end
     local hum = ch:FindFirstChildOfClass("Humanoid")
     local root = ch:FindFirstChild("HumanoidRootPart") or ch:FindFirstChild("Torso")
     local head = ch:FindFirstChild("Head")
@@ -1809,11 +1954,17 @@ local function removeHL(p)
     removeCache(p)
     EnemyHP[p] = nil
     PrevAliveState[p] = nil
+    _tcache[p] = nil
 end
 
 for _, p in ipairs(Players:GetPlayers()) do addHL(p) end
 Players.PlayerAdded:Connect(addHL)
 Players.PlayerRemoving:Connect(removeHL)
+
+Players.PlayerRemoving:Connect(function(p) _tcache[p] = nil end)
+Players.PlayerAdded:Connect(function(p) 
+    p.CharacterAdded:Connect(function() _tcache[p] = nil end) 
+end)
 
 -- =============================================
 -- TAB 1: AIM
@@ -1821,6 +1972,7 @@ Players.PlayerRemoving:Connect(removeHL)
 local AimLeft = Tabs.Aim:AddLeftGroupbox("Aimbot", "crosshair")
 AimLeft:AddToggle("AimOn", { Text = "Enable Aimbot", Default = false })
 AimLeft:AddToggle("AimMouseHard", { Text = "Hard Lock (Mouse)", Default = false, Tooltip = "Hard mousemoverel - no smoothing" })
+AimLeft:AddToggle("AimTeamCheck", { Text = "Team Check", Default = false, Tooltip = "Only target enemies (based on HUD highlights/billboards)" })
 AimLeft:AddSlider("AimSm", { Text = "Smooth Mouse Speed", Default = 3, Min = 1, Max = 20, Rounding = 1, Tooltip = "Lower = snappier, Higher = smoother" })
 AimLeft:AddSlider("AimFOV", { Text = "FOV Radius", Default = 200, Min = 50, Max = 800, Rounding = 0 })
 AimLeft:AddSlider("AimDist", { Text = "Max Distance", Default = 1500, Min = 100, Max = 5000, Rounding = 0, Suffix = " studs" })
@@ -1833,6 +1985,7 @@ StickyBox:AddSlider("AimStickyStr", { Text = "Sticky Strength", Default = 0.5, M
 
 local VisBox = Tabs.Aim:AddLeftGroupbox("Visibility")
 VisBox:AddToggle("AimVisCheck", { Text = "Visible Check", Default = false, Tooltip = "Only target visible players" })
+VisBox:AddToggle("AimDeadCheck", { Text = "Dead Check", Default = true, Tooltip = "Ignore dead players" })
 
 local FOVBox = Tabs.Aim:AddRightGroupbox("FOV Circle", "circle")
 FOVBox:AddToggle("AimShowFOV", { Text = "Show FOV Circle", Default = false }):AddColorPicker("AimFOVCol", { Default = Color3.fromRGB(255, 255, 255), Title = "FOV Color" })
@@ -1853,6 +2006,8 @@ ScopeBox:AddLabel("Scope Key"):AddKeyPicker("ScopeKey", { Default = "MB2", Mode 
 -- =============================================
 local ESPBox = Tabs.Visuals:AddLeftGroupbox("ESP", "eye")
 ESPBox:AddToggle("ESPOn", { Text = "Enable ESP", Default = false })
+ESPBox:AddToggle("ESPTeamCheck", { Text = "Team Check", Default = false, Tooltip = "Only show ESP for enemies (based on HUD highlights/billboards)" })
+ESPBox:AddToggle("ESPDeadCheck", { Text = "Dead Check", Default = true, Tooltip = "Ignore dead players" })
 ESPBox:AddToggle("ESPHL", { Text = "Player Glow", Default = false }):AddColorPicker("ESPHLCol", { Default = Color3.fromRGB(255, 255, 255), Title = "Highlight Color" })
 ESPBox:AddSlider("ESPFillT", { Text = "Glow Fill Trans", Default = 0.75, Min = 0, Max = 1, Rounding = 2 })
 ESPBox:AddSlider("ESPOutT", { Text = "Glow Outline Trans", Default = 0, Min = 0, Max = 1, Rounding = 2 })
@@ -2012,6 +2167,90 @@ MoveBox:AddToggle("InfJump", { Text = "Infinite Jump", Default = false })
 MoveBox:AddToggle("Noclip", { Text = "Noclip", Default = false })
 MoveBox:AddButton({ Text = "Apply Speed", Func = updateSpeed })
 
+-- =============================================
+-- THIRD PERSON (VISUAL ONLY) — entre Movement et TP Under
+-- =============================================
+local ThirdPersonBox = Tabs.Misc:AddLeftGroupbox("Third Person (Visual)", "camera")
+
+ThirdPersonBox:AddToggle("TPOn", {
+    Text = "Enable Third Person",
+    Default = false,
+    Callback = function(v)
+        if v and not ThirdPerson.enabled then
+            enableThirdPerson()
+        elseif not v and ThirdPerson.enabled then
+            disableThirdPerson()
+        end
+    end
+})
+
+ThirdPersonBox:AddSlider("TPDistance", {
+    Text = "Distance",
+    Default = 8,
+    Min = 2,
+    Max = 30,
+    Rounding = 1,
+    Suffix = " studs"
+})
+
+ThirdPersonBox:AddSlider("TPHeight", {
+    Text = "Height Offset",
+    Default = 0,
+    Min = -5,
+    Max = 15,
+    Rounding = 1,
+    Suffix = " studs"
+})
+
+ThirdPersonBox:AddSlider("TPShoulder", {
+    Text = "Shoulder Offset",
+    Default = 0,
+    Min = -5,
+    Max = 5,
+    Rounding = 1,
+    Suffix = " studs"
+})
+
+ThirdPersonBox:AddToggle("TPCustomFOV", {
+    Text = "Custom FOV",
+    Default = false
+})
+
+ThirdPersonBox:AddSlider("TPFOV", {
+    Text = "FOV",
+    Default = 70,
+    Min = 30,
+    Max = 120,
+    Rounding = 0
+})
+
+ThirdPersonBox:AddLabel("Toggle Key"):AddKeyPicker("TPKey", {
+    Default = "V",
+    Mode = "Toggle",
+    Text = "Third Person Toggle"
+})
+
+Options.TPKey:OnClick(function() toggleThirdPerson() end)
+
+ThirdPersonBox:AddDivider()
+
+ThirdPersonBox:AddToggle("SelfHLOn", {
+    Text = "Rainbow Self Outline",
+    Default = true,
+    Tooltip = "Contour rainbow sur ton propre perso (utile en 3rd person pour te repérer)"
+})
+
+ThirdPersonBox:AddSlider("SelfHLSpeed", {
+    Text = "Outline Rainbow Speed",
+    Default = 5,
+    Min = 1,
+    Max = 20,
+    Rounding = 0
+})
+
+-- =============================================
+-- TP UNDER ENEMY
+-- =============================================
 local TPUnderBox = Tabs.Misc:AddLeftGroupbox("TP Under Enemy", "map-pin")
 TPUnderBox:AddLabel("Press X to toggle ON/OFF", true)
 TPUnderBox:AddLabel("ON: TP -7.5 under enemy -> Lock Y -> Follow X/Z", true)
@@ -2120,6 +2359,21 @@ Library.ToggleKeybind = Options.MenuKB
 -- HEARTBEAT LOOP
 -- =============================================
 RunService.Heartbeat:Connect(function()
+    -- ===== Self Highlight (rainbow outline sur ton perso) =====
+    if Toggles.SelfHLOn and Toggles.SelfHLOn.Value then
+        local char = LocalPlayer.Character
+        if not SelfHighlight.instance or SelfHighlight.instance.Adornee ~= char then
+            createSelfHighlight()
+        end
+        if SelfHighlight.instance then
+            SelfHighlight.hue = (SelfHighlight.hue + ((Options.SelfHLSpeed and Options.SelfHLSpeed.Value) or 5) / 500) % 1
+            local col = Color3.fromHSV(SelfHighlight.hue, 1, 1)
+            SelfHighlight.instance.OutlineColor = col
+        end
+    elseif SelfHighlight.instance then
+        destroySelfHighlight()
+    end
+
     if HasDrawing and FOVDraw and FOVFillDraw and Toggles.AimShowFOV.Value then
         local vp = Camera.ViewportSize
         local ctr = Vector2.new(vp.X / 2, vp.Y / 2)
@@ -2160,9 +2414,13 @@ RunService.Heartbeat:Connect(function()
         RainbowHue = (RainbowHue + (Options.ESPRBSpeed.Value / 1000)) % 1
     end
     
+    local useTeamCheck = Toggles.ESPTeamCheck and Toggles.ESPTeamCheck.Value
+    local useDeadCheck = Toggles.ESPDeadCheck and Toggles.ESPDeadCheck.Value
     for p, hl in pairs(Highlights) do
         if hl and hl.Parent then
-            hl.Enabled = Toggles.ESPOn.Value and Toggles.ESPHL.Value
+            local isEnemyPlayer = not useTeamCheck or isEnemy(p, true)
+            local isAlivePlayer = isAlive(p, useDeadCheck)
+            hl.Enabled = Toggles.ESPOn.Value and Toggles.ESPHL.Value and isEnemyPlayer and isAlivePlayer
             if Toggles.ESPRainbow.Value then
                 hl.FillColor = Color3.fromHSV(RainbowHue, 1, 1)
                 hl.OutlineColor = Color3.fromHSV(RainbowHue, 1, 1)
@@ -2377,6 +2635,10 @@ LocalPlayer.CharacterAdded:Connect(function()
     if ScopeActive then stopScope() end
     EnemyHP = {}
     PrevAliveState = {}
+    if SelfHighlight.instance then
+        pcall(function() SelfHighlight.instance:Destroy() end)
+        SelfHighlight.instance = nil
+    end
 end)
 
 -- =============================================
@@ -2387,6 +2649,7 @@ Library:OnUnload(function()
         if c and typeof(c) == "RBXScriptConnection" then c:Disconnect() end
     end
     if TPUnderEnemy.connection then TPUnderEnemy.connection:Disconnect() end
+    if ThirdPerson.connection then ThirdPerson.connection:Disconnect() end
     if SkyboxForceConnection then SkyboxForceConnection:Disconnect() end
     if HasDrawing then
         if FOVDraw then pcall(function() FOVDraw:Remove() end) end
@@ -2406,6 +2669,10 @@ Library:OnUnload(function()
     if BloomEffect then pcall(function() BloomEffect:Destroy() end) end
     if ColorCorrection then pcall(function() ColorCorrection:Destroy() end) end
     Camera.FieldOfView = 70
+    if ThirdPerson.enabled then
+        disableThirdPerson()
+    end
+    destroySelfHighlight()
     if TPUnderEnemy.enabled then
         if TPUnderEnemy.startPosition then
             local char = LocalPlayer.Character
@@ -2424,7 +2691,7 @@ end)
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({"MenuKB", "AimKey", "ScopeKey", "SkyboxNextKey", "TPUnderKey"})
+SaveManager:SetIgnoreIndexes({"MenuKB", "AimKey", "ScopeKey", "SkyboxNextKey", "TPUnderKey", "TPKey"})
 ThemeManager:SetFolder("CulHook")
 SaveManager:SetFolder("CulHook/configs")
 SaveManager:BuildConfigSection(Tabs.Settings)
@@ -2445,4 +2712,4 @@ task.spawn(function()
     task.wait(1)
     if UnlockAll.initialized then return end
     runUnlockAll(true)
-end)
+end)    
