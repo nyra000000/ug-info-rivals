@@ -273,6 +273,316 @@ local function hasKatanaEquipped(plr)
     return false
 end
 
+-- =============================================
+-- RAPID FIRE STATE
+-- =============================================
+local RapidFireState = {
+    enabled = false,
+    originals = {},
+    itemLib = nil,
+}
+
+local function enableRapidFire()
+    if RapidFireState.enabled then return end
+    local ok, lib = pcall(function()
+        return require(ReplicatedStorage.Modules.ItemLibrary)
+    end)
+    if not ok or not lib then
+        Library:Notify({Title = "Rapid Fire", Description = "ItemLibrary introuvable!", Time = 3})
+        return
+    end
+    RapidFireState.itemLib = lib
+    RapidFireState.originals = {}
+    local function scan(tbl)
+        for _, v in pairs(tbl) do
+            if typeof(v) == "table" then
+                local saved = {}
+                for _, key in ipairs({"ShootCooldown", "BurstCooldown", "AttackCooldown", "HeavyAttackCooldown"}) do
+                    if v[key] ~= nil then
+                        saved[key] = v[key]
+                        v[key] = 0.000000000000000001
+                    end
+                end
+                if next(saved) then
+                    RapidFireState.originals[v] = saved
+                end
+                scan(v)
+            end
+        end
+    end
+    scan(lib)
+    RapidFireState.enabled = true
+    Library:Notify({Title = "Rapid Fire", Description = "Activé", Time = 3})
+end
+
+local function disableRapidFire()
+    if not RapidFireState.enabled then return end
+    for tbl, saved in pairs(RapidFireState.originals) do
+        for key, val in pairs(saved) do
+            pcall(function() tbl[key] = val end)
+        end
+    end
+    RapidFireState.originals = {}
+    RapidFireState.enabled = false
+    Library:Notify({Title = "Rapid Fire", Description = "Désactivé", Time = 2})
+end
+
+-- =============================================
+-- MELEE MODE STATE
+-- =============================================
+local MeleeModeState = {
+    enabled = false,
+    connection = nil,
+    depsLoaded = false,
+    lastFire = 0,
+    deflecting = {},
+    util = nil,
+    enum = nil,
+    fighterCtrl = nil,
+    spectateCtrl = nil,
+    repS = nil,
+    plrs = nil,
+    runS = nil,
+    ws = nil,
+    lplr = nil,
+}
+
+local function safeCloneRef(service)
+    if cloneref then
+        local ok, result = pcall(cloneref, service)
+        if ok then return result end
+    end
+    return service
+end
+
+local function loadMeleeDeps()
+    if MeleeModeState.depsLoaded then return true end
+    local ok = pcall(function()
+        MeleeModeState.repS = safeCloneRef(game:GetService("ReplicatedStorage"))
+        MeleeModeState.plrs = safeCloneRef(game:GetService("Players"))
+        MeleeModeState.runS = safeCloneRef(game:GetService("RunService"))
+        MeleeModeState.ws = safeCloneRef(game:GetService("Workspace"))
+        MeleeModeState.lplr = MeleeModeState.plrs.LocalPlayer
+        MeleeModeState.util = require(MeleeModeState.repS.Modules.Utility)
+        MeleeModeState.enum = require(MeleeModeState.repS.Modules.EnumLibrary)
+        MeleeModeState.fighterCtrl = require(MeleeModeState.lplr.PlayerScripts.Controllers.FighterController)
+        MeleeModeState.spectateCtrl = require(MeleeModeState.lplr.PlayerScripts.Controllers:WaitForChild("SpectateController"))
+    end)
+    if ok then
+        MeleeModeState.depsLoaded = true
+        return true
+    end
+    Library:Notify({Title = "Melee Mode", Description = "Dépendances introuvables!", Time = 3})
+    return false
+end
+
+local function meleeGetSlotNumber()
+    -- Slot fixe: Melee (3) — le snippet original utilisait un config externe,
+    -- on le câble en dur sur Melee puisque c'est le mode demandé.
+    return 3
+end
+
+local function meleeUpdateDeflection()
+    if not MeleeModeState.fighterCtrl or not MeleeModeState.fighterCtrl.Objects then return end
+    for _, fighterObj in MeleeModeState.fighterCtrl.Objects do
+        local player = fighterObj.Player
+        if not player then continue end
+        if not fighterObj.Entity or not fighterObj.Entity:IsAlive() or fighterObj:Get("IsSpectating") then
+            MeleeModeState.deflecting[player] = false
+            continue
+        end
+        local equipped = fighterObj.EquippedItem
+        local isKatana = equipped and equipped.ViewModel and equipped.ViewModel.Name == "Katana"
+        local isDeflecting = false
+        if isKatana then
+            isDeflecting = (equipped._attack_cooldown and equipped._attack_cooldown > tick()) or false
+        end
+        MeleeModeState.deflecting[player] = isDeflecting
+    end
+end
+
+local function meleeIsEnemy(player)
+    if player == MeleeModeState.lplr then return false end
+    local duel = MeleeModeState.spectateCtrl.CurrentDuelSubject
+    local localDueler = duel and duel:GetDueler(MeleeModeState.lplr)
+    local localTeam = localDueler and localDueler:Get("TeamID") or nil
+    if localTeam and duel and duel.Duelers then
+        for _, dueler in duel.Duelers do
+            if dueler.Player == player then
+                local team = dueler:Get("TeamID")
+                return team ~= localTeam
+            end
+        end
+    end
+    local pTeam = player:GetAttribute("TeamID")
+    local lTeam = MeleeModeState.lplr:GetAttribute("TeamID")
+    if pTeam and lTeam then
+        return pTeam ~= lTeam
+    end
+    return true
+end
+
+local function meleeGetClosestTarget()
+    local char = MeleeModeState.lplr.Character
+    if not char then return nil, nil, nil end
+    local myRoot = char:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil, nil, nil end
+    local closestPlayer = nil
+    local closestRoot = nil
+    local closestHead = nil
+    local closestDist = 500
+    for _, player in MeleeModeState.plrs:GetPlayers() do
+        if not meleeIsEnemy(player) then continue end
+        local pChar = player.Character
+        if not pChar then continue end
+        local pRoot = pChar:FindFirstChild("HumanoidRootPart")
+        local pHead = pChar:FindFirstChild("Head")
+        local pHum = pChar:FindFirstChildWhichIsA("Humanoid")
+        if not (pRoot and pHead and pHum and pHum.Health > 0) then continue end
+        local dist = (myRoot.Position - pRoot.Position).Magnitude
+        if dist < closestDist then
+            closestDist = dist
+            closestPlayer = player
+            closestRoot = pRoot
+            closestHead = pHead
+        end
+    end
+    return closestPlayer, closestRoot, closestHead
+end
+
+local function meleeHasKnifeViewModel(targetPlayer)
+    if not targetPlayer then return false end
+    local viewModels = MeleeModeState.ws:FindFirstChild("ViewModels")
+    if not viewModels then return false end
+    local targetName = targetPlayer.Name
+    for _, model in viewModels:GetChildren() do
+        if model:IsA("Model")
+           and string.find(model.Name, targetName, 1, true)
+           and string.find(model.Name, "Knife", 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+local function enableMeleeMode()
+    if MeleeModeState.enabled then return end
+    if not loadMeleeDeps() then return end
+
+    MeleeModeState.lastFire = 0
+    MeleeModeState.deflecting = {}
+
+    -- Équipe le Melee immédiatement + retry loop
+    task.spawn(function()
+        local localFighter = MeleeModeState.fighterCtrl.LocalFighter
+        while not localFighter and MeleeModeState.enabled do
+            task.wait(0.1)
+            localFighter = MeleeModeState.fighterCtrl.LocalFighter
+        end
+        if localFighter then
+            pcall(function() localFighter:EquipItem(meleeGetSlotNumber()) end)
+        end
+    end)
+
+    task.spawn(function()
+        while MeleeModeState.enabled do
+            task.wait(1)
+            local localFighter = MeleeModeState.fighterCtrl.LocalFighter
+            if localFighter then
+                pcall(function() localFighter:EquipItem(meleeGetSlotNumber()) end)
+            end
+        end
+    end)
+
+    MeleeModeState.plrs.PlayerRemoving:Connect(function(player)
+        MeleeModeState.deflecting[player] = nil
+    end)
+
+    MeleeModeState.connection = MeleeModeState.runS.Heartbeat:Connect(function()
+        if not MeleeModeState.enabled then return end
+        meleeUpdateDeflection()
+        local targetPlayer, targetRoot, targetHead = meleeGetClosestTarget()
+        local desyncCF = nil
+
+        if targetRoot and targetHead then
+            local desyncPos
+            if meleeHasKnifeViewModel(targetPlayer) then
+                desyncPos = (targetRoot.CFrame * CFrame.new(0, 6, 0)).Position
+            else
+                desyncPos = (targetRoot.CFrame * CFrame.new(0, 1, 2)).Position
+            end
+            desyncCF = CFrame.lookAt(desyncPos, targetHead.Position)
+        end
+
+        if desyncCF and MeleeModeState.lplr.Character then
+            local myRoot = MeleeModeState.lplr.Character:FindFirstChild("HumanoidRootPart")
+            if myRoot then
+                local oldCF = myRoot.CFrame
+                local oldVel = myRoot.Velocity
+                local oldRotVel = myRoot.RotVelocity
+                myRoot.CFrame = desyncCF
+                MeleeModeState.runS:BindToRenderStep("__restore", 101, function()
+                    if myRoot then
+                        myRoot.CFrame = oldCF
+                        myRoot.Velocity = oldVel
+                        myRoot.RotVelocity = oldRotVel
+                    end
+                    MeleeModeState.runS:UnbindFromRenderStep("__restore")
+                end)
+            end
+        end
+
+        if not targetPlayer or not targetHead or not targetRoot then return end
+        if MeleeModeState.deflecting[targetPlayer] then return end
+        if not MeleeModeState.lplr.Character or not MeleeModeState.lplr.Character:FindFirstChild("HumanoidRootPart") then return end
+        if not MeleeModeState.fighterCtrl or not MeleeModeState.fighterCtrl.LocalFighter then return end
+        local item = MeleeModeState.fighterCtrl.LocalFighter.EquippedItem
+        if not item then return end
+        if tick() - MeleeModeState.lastFire < 0.0005 then return end
+        MeleeModeState.lastFire = tick()
+
+        local originPos = desyncCF and desyncCF.Position or targetRoot.Position
+        local targetPos = targetHead.Position
+        local aimCF = CFrame.lookAt(originPos, targetPos)
+        local targetCF = targetHead.CFrame
+        local randomOffset = Vector3.new(
+            (math.random() - 0.5) * 0.1,
+            (math.random() - 0.5) * 0.1,
+            (math.random() - 0.5) * 0.1
+        )
+        local aimedPos = targetPos + randomOffset
+        local objSpaceHeadOffset = targetHead.CFrame:ToObjectSpace(CFrame.new(aimedPos))
+        local cameradata = {}
+        cameradata[utf8.char(1)] = {
+            [utf8.char(0)] = MeleeModeState.util:EncodeCFrame(aimCF),
+            [utf8.char(1)] = MeleeModeState.util:EncodeCFrame(targetCF),
+            [utf8.char(2)] = targetHead,
+            [utf8.char(3)] = MeleeModeState.util:EncodeCFrame(objSpaceHeadOffset)
+        }
+        MeleeModeState.repS.Remotes.Replication.Fighter.UseItem:FireServer(
+            item:Get("ObjectID"),
+            MeleeModeState.enum:ToEnum("StartShooting"),
+            cameradata,
+            nil
+        )
+    end)
+
+    MeleeModeState.enabled = true
+    Library:Notify({Title = "Melee Mode", Description = "Activé - desync + melee fire", Time = 3})
+end
+
+local function disableMeleeMode()
+    if not MeleeModeState.enabled then return end
+    MeleeModeState.enabled = false
+    if MeleeModeState.connection then
+        MeleeModeState.connection:Disconnect()
+        MeleeModeState.connection = nil
+    end
+    pcall(function() MeleeModeState.runS:UnbindFromRenderStep("__restore") end)
+    MeleeModeState.deflecting = {}
+    Library:Notify({Title = "Melee Mode", Description = "Désactivé", Time = 2})
+end
+
 local GraphicsState = {
     removedDecals = {},
     removedParticles = {},
@@ -3027,7 +3337,7 @@ SrvBox:AddButton({ Text = "Copy Server Link", Func = function()
 end })
 
 -- =============================================
--- TAB 6: DIVERS (ANTI KATANA + EXTRAS)
+-- TAB 6: DIVERS (ANTI KATANA + RAPID FIRE + MELEE MODE + EXTRAS)
 -- =============================================
 local DiversBox = Tabs.Divers:AddLeftGroupbox("Anti Katana", "shield")
 
@@ -3066,6 +3376,26 @@ DiversBox:AddToggle("AntiKatanaVisualize", {
         if v then
             Library:Notify({Title = "Anti Katana", Description = "Debug activé - regarde F9", Time = 3})
         end
+    end
+})
+
+DiversBox:AddDivider()
+
+DiversBox:AddToggle("RapidFireOn", {
+    Text = "Rapid Fire",
+    Default = false,
+    Callback = function(v)
+        if v then enableRapidFire() else disableRapidFire() end
+    end
+})
+
+DiversBox:AddDivider()
+
+DiversBox:AddToggle("MeleeModeOn", {
+    Text = "Melee Mode",
+    Default = false,
+    Callback = function(v)
+        if v then enableMeleeMode() else disableMeleeMode() end
     end
 })
 
@@ -3531,6 +3861,7 @@ Library:OnUnload(function()
     if FlyState.velocity then pcall(function() FlyState.velocity:Destroy() end) end
     if FlyState.gyro then pcall(function() FlyState.gyro:Destroy() end) end
     if SkyboxForceConnection then SkyboxForceConnection:Disconnect() end
+    if MeleeModeState.connection then MeleeModeState.connection:Disconnect() end
     if HasDrawing then
         if FOVDraw then pcall(function() FOVDraw:Remove() end) end
         if FOVFillDraw then pcall(function() FOVFillDraw:Remove() end) end
