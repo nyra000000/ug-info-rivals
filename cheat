@@ -483,6 +483,227 @@ local function disableRapidFire()
 end
 
 -- ============================================================
+-- MELEE RAGE
+-- ============================================================
+do
+    local MeleeRage = { enabled = false, heartbeat = nil, removingConn = nil, toggle = nil }
+    GENV.MeleeRage = MeleeRage
+    local MeleeRageState = MeleeRage
+
+    local function getCloneRef(obj)
+    local ok, res = pcall(function() return cloneref(obj) end)
+    if ok and res then return res end
+    return obj
+end
+
+local function startMeleeRage()
+    if MeleeRageState.enabled then return end
+
+    local repS = getCloneRef(ReplicatedStorage)
+    local plrs = getCloneRef(Players)
+    local runS = getCloneRef(RunService)
+    local ws = getCloneRef(Workspace)
+    local lplr = LocalPlayer
+
+    local util, enum, FighterController, SpectateController
+    local ok = pcall(function()
+        util = require(repS.Modules.Utility)
+        enum = require(repS.Modules.EnumLibrary)
+        FighterController = require(lplr.PlayerScripts.Controllers.FighterController)
+        SpectateController = require(lplr.PlayerScripts.Controllers:WaitForChild("SpectateController"))
+    end)
+    if not ok or not (util and enum and FighterController and SpectateController) then
+        Library:Notify({Title = "Ragebot", Description = "Modules introuvables!", Time = 3})
+        return
+    end
+
+    local FireRate = 0.0005
+
+    MeleeRageState.enabled = true
+
+    local lastFire = 0
+    local deflecting = {}
+    MeleeRageState.removingConn = plrs.PlayerRemoving:Connect(function(player)
+        deflecting[player] = nil
+    end)
+
+    local function updateDeflection()
+        if not FighterController or not FighterController.Objects then return end
+        for _, fighterObj in FighterController.Objects do
+            local player = fighterObj.Player
+            if not player then continue end
+            if not fighterObj.Entity or not fighterObj.Entity:IsAlive() or fighterObj:Get("IsSpectating") then
+                deflecting[player] = false
+                continue
+            end
+            local equipped = fighterObj.EquippedItem
+            local isKatana = equipped and equipped.ViewModel and equipped.ViewModel.Name == "Katana"
+            local isDeflecting = false
+            if isKatana then
+                isDeflecting = (equipped._attack_cooldown and equipped._attack_cooldown > tick()) or false
+            end
+            deflecting[player] = isDeflecting
+        end
+    end
+
+    local function isEnemy(player)
+        if player == lplr then return false end
+        local duel = SpectateController.CurrentDuelSubject
+        local localDueler = duel and duel:GetDueler(lplr)
+        local localTeam = localDueler and localDueler:Get("TeamID") or nil
+        if localTeam and duel and duel.Duelers then
+            for _, dueler in duel.Duelers do
+                if dueler.Player == player then
+                    local team = dueler:Get("TeamID")
+                    return team ~= localTeam
+                end
+            end
+        end
+        local pTeam = player:GetAttribute("TeamID")
+        local lTeam = lplr:GetAttribute("TeamID")
+        if pTeam and lTeam then
+            return pTeam ~= lTeam
+        end
+        return true
+    end
+
+    local function getClosestTarget()
+        local char = lplr.Character
+        if not char then return nil, nil, nil end
+        local myRoot = char:FindFirstChild("HumanoidRootPart")
+        if not myRoot then return nil, nil, nil end
+        local closestPlayer, closestRoot, closestHead = nil, nil, nil
+        local closestDist = 500
+        for _, player in plrs:GetPlayers() do
+            if not isEnemy(player) then continue end
+            local pChar = player.Character
+            if not pChar then continue end
+            local pRoot = pChar:FindFirstChild("HumanoidRootPart")
+            local pHead = pChar:FindFirstChild("Head")
+            local pHum = pChar:FindFirstChildWhichIsA("Humanoid")
+            if not (pRoot and pHead and pHum and pHum.Health > 0) then continue end
+            local dist = (myRoot.Position - pRoot.Position).Magnitude
+            if dist < closestDist then
+                closestDist = dist
+                closestPlayer = player
+                closestRoot = pRoot
+                closestHead = pHead
+            end
+        end
+        return closestPlayer, closestRoot, closestHead
+    end
+
+    local function hasKnifeViewModel(targetPlayer)
+        if not targetPlayer then return false end
+        local viewModels = ws:FindFirstChild("ViewModels")
+        if not viewModels then return false end
+        local targetName = targetPlayer.Name
+        for _, model in viewModels:GetChildren() do
+            if model:IsA("Model")
+               and string.find(model.Name, targetName, 1, true)
+               and string.find(model.Name, "Knife", 1, true) then
+                return true
+            end
+        end
+        return false
+    end
+
+    MeleeRageState.heartbeat = runS.Heartbeat:Connect(function()
+        if not MeleeRageState.enabled then return end
+        updateDeflection()
+        local targetPlayer, targetRoot, targetHead = getClosestTarget()
+        local desyncCF = nil
+
+        if targetRoot and targetHead then
+            local desyncPos
+            if hasKnifeViewModel(targetPlayer) then
+                desyncPos = (targetRoot.CFrame * CFrame.new(0, 6, 0)).Position
+            else
+                desyncPos = (targetRoot.CFrame * CFrame.new(0, 1, 2)).Position
+            end
+            desyncCF = CFrame.lookAt(desyncPos, targetHead.Position)
+        end
+
+        if desyncCF and lplr.Character then
+            local myRoot = lplr.Character:FindFirstChild("HumanoidRootPart")
+            if myRoot then
+                local oldCF = myRoot.CFrame
+                local oldVel = myRoot.Velocity
+                local oldRotVel = myRoot.RotVelocity
+                myRoot.CFrame = desyncCF
+                runS:BindToRenderStep("__restore", 101, function()
+                    if myRoot then
+                        myRoot.CFrame = oldCF
+                        myRoot.Velocity = oldVel
+                        myRoot.RotVelocity = oldRotVel
+                    end
+                    runS:UnbindFromRenderStep("__restore")
+                end)
+            end
+        end
+
+        if not targetPlayer or not targetHead or not targetRoot then return end
+        if deflecting[targetPlayer] then return end
+        if not lplr.Character or not lplr.Character:FindFirstChild("HumanoidRootPart") then return end
+        if not FighterController or not FighterController.LocalFighter then return end
+        local item = FighterController.LocalFighter.EquippedItem
+        if not item then return end
+        if tick() - lastFire < FireRate then return end
+        lastFire = tick()
+        local originPos = desyncCF and desyncCF.Position or targetRoot.Position
+        local targetPos = targetHead.Position
+        local aimCF = CFrame.lookAt(originPos, targetPos)
+        local targetCF = targetHead.CFrame
+        local randomOffset = Vector3.new(
+            (math.random() - 0.5) * 0.1,
+            (math.random() - 0.5) * 0.1,
+            (math.random() - 0.5) * 0.1
+        )
+        local aimedPos = targetPos + randomOffset
+        local objSpaceHeadOffset = targetHead.CFrame:ToObjectSpace(CFrame.new(aimedPos))
+        local cameradata = {}
+        cameradata[utf8.char(1)] = {
+            [utf8.char(0)] = util:EncodeCFrame(aimCF),
+            [utf8.char(1)] = util:EncodeCFrame(targetCF),
+            [utf8.char(2)] = targetHead,
+            [utf8.char(3)] = util:EncodeCFrame(objSpaceHeadOffset)
+        }
+        repS.Remotes.Replication.Fighter.UseItem:FireServer(
+            item:Get("ObjectID"),
+            enum:ToEnum("StartShooting"),
+            cameradata,
+            nil
+        )
+    end)
+
+    Library:Notify({Title = "Ragebot", Description = "Activé", Time = 3})
+end
+
+local function stopMeleeRage()
+    if not MeleeRageState.enabled then return end
+    MeleeRageState.enabled = false
+    if MeleeRageState.heartbeat then
+        MeleeRageState.heartbeat:Disconnect()
+        MeleeRageState.heartbeat = nil
+    end
+    if MeleeRageState.removingConn then
+        MeleeRageState.removingConn:Disconnect()
+        MeleeRageState.removingConn = nil
+    end
+    Library:Notify({Title = "Ragebot", Description = "Désactivé", Time = 2})
+end
+
+local function toggleMeleeRage()
+    if MeleeRageState.enabled then stopMeleeRage() else startMeleeRage() end
+    if MeleeRageState.toggle then MeleeRageState.toggle:Set(MeleeRageState.enabled) end
+end
+
+    GENV.MeleeRage.Start = startMeleeRage
+    GENV.MeleeRage.Stop = stopMeleeRage
+    GENV.MeleeRage.Toggle = toggleMeleeRage
+end
+
+-- ============================================================
 -- GRAPHICS STATE
 -- ============================================================
 local GraphicsState = {
@@ -2855,6 +3076,15 @@ DiversBox:AddToggle("RapidFireOn", {Text = "Rapid Fire", Default = false, Callba
     if v then enableRapidFire() else disableRapidFire() end
 end})
 
+GENV.MeleeRage.box = Tabs.Divers:AddLeftGroupbox("Ragebot", "zap")
+GENV.MeleeRage.box:AddLabel("Frappe en TP desync", true)
+GENV.MeleeRage.box:AddDivider()
+GENV.MeleeRage.toggle = GENV.MeleeRage.box:AddToggle("MeleeRageOn", {Text = "Enable Ragebot", Default = false, Callback = function(value)
+    if value ~= GENV.MeleeRage.enabled then GENV.MeleeRage.Toggle() end
+end})
+GENV.MeleeRage.box:AddLabel("Ragebot Key"):AddKeyPicker("MeleeRageKey", {Default = "None", Mode = "Toggle", Text = "Ragebot Toggle"})
+Options.MeleeRageKey:OnClick(function() GENV.MeleeRage.Toggle() end)
+
 local DiversExtras = Tabs.Divers:AddRightGroupbox("Extras", "zap")
 DiversExtras:AddLabel("Options diverses", true)
 DiversExtras:AddDivider()
@@ -3186,6 +3416,7 @@ Library:OnUnload(function()
         if c and typeof(c) == "RBXScriptConnection" then c:Disconnect() end
     end
     if TPUnderEnemy.connection then TPUnderEnemy.connection:Disconnect() end
+    if GENV.MeleeRage.enabled then GENV.MeleeRage.Stop() end
     if ThirdPerson.connection then ThirdPerson.connection:Disconnect() end
     if FlyState.connection then FlyState.connection:Disconnect() end
     if FlyState.velocity then pcall(function() FlyState.velocity:Destroy() end) end
@@ -3262,7 +3493,7 @@ if SaveManager then
     pcall(function()
         SaveManager:SetLibrary(Library)
         SaveManager:IgnoreThemeSettings()
-        SaveManager:SetIgnoreIndexes({"MenuKB","AimKey","ScopeKey","SkyboxNextKey","TPUnderKey","TPKey","FlyKey","AntiKatanaKey"})
+        SaveManager:SetIgnoreIndexes({"MenuKB","AimKey","ScopeKey","SkyboxNextKey","TPUnderKey","TPKey","FlyKey","AntiKatanaKey","MeleeRageKey"})
         SaveManager:SetFolder("CulHook/configs")
         SaveManager:BuildConfigSection(Tabs.Settings)
         SaveManager:LoadAutoloadConfig()
